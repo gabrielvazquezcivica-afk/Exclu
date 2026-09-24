@@ -10,7 +10,7 @@ let pluginsLoading = null
 const initializedSockets =
     new WeakSet()
 
-const socketStartTimes =
+const messageCutoffs =
     new WeakMap()
 
 function getNumber(jid) {
@@ -31,55 +31,184 @@ function isBotMessage(m) {
 }
 
 function getMessageTimestamp(m) {
-    if (!m) {
-        return 0
-    }
-
     const timestamp =
-        Number(
-            m.messageTimestamp
-        )
+        m?.messageTimestamp ??
+        m?.key?.messageTimestamp
 
     if (
-        !Number.isFinite(timestamp) ||
-        timestamp <= 0
+        timestamp === undefined ||
+        timestamp === null
     ) {
         return 0
     }
 
-    return timestamp * 1000
+    const number =
+        Number(timestamp)
+
+    if (!Number.isFinite(number)) {
+        return 0
+    }
+
+    return number < 100000000000
+        ? number * 1000
+        : number
 }
 
-function isOldMessage(
+function isOldMessage(m) {
+    const timestamp =
+        getMessageTimestamp(m)
+
+    if (!timestamp) {
+        return false
+    }
+
+    return Date.now() - timestamp > 60000
+}
+
+function isBeforeHandlerStart(
     sock,
     m
 ) {
-    const socketStartTime =
-        socketStartTimes.get(
-            sock
-        )
+    const cutoff =
+        messageCutoffs.get(sock)
 
-    if (
-        !socketStartTime
-    ) {
+    if (!cutoff) {
         return false
     }
 
-    const messageTime =
-        getMessageTimestamp(
-            m
-        )
+    const timestamp =
+        getMessageTimestamp(m)
 
-    if (
-        !messageTime
-    ) {
+    if (!timestamp) {
         return false
     }
 
-    return (
-        messageTime <
-        socketStartTime
+    return timestamp < cutoff
+}
+
+function getStickerHash(message) {
+    if (!message) {
+        return null
+    }
+
+    const hash =
+        message.fileSha256 ||
+        message.msg?.fileSha256 ||
+        message.message?.stickerMessage?.fileSha256
+
+    if (!hash) {
+        return null
+    }
+
+    try {
+        return Buffer
+            .from(hash)
+            .toString('base64')
+    } catch {
+        return null
+    }
+}
+
+function isStickerMessage(m) {
+    return Boolean(
+        m?.mtype === 'stickerMessage' ||
+        m?.message?.stickerMessage ||
+        m?.msg?.fileSha256
     )
+}
+
+function loadStickerCommands() {
+    const dbPath =
+        path.join(
+            process.cwd(),
+            'database',
+            'stickers.json'
+        )
+
+    try {
+        if (!fs.existsSync(dbPath)) {
+            return {}
+        }
+
+        const data =
+            fs.readFileSync(
+                dbPath,
+                'utf8'
+            )
+
+        return JSON.parse(
+            data || '{}'
+        )
+    } catch (error) {
+        console.error(
+            '[STICKER CMD] Error leyendo stickers:',
+            error
+        )
+
+        return {}
+    }
+}
+
+async function processSticker(
+    sock,
+    m
+) {
+    if (!isStickerMessage(m)) {
+        return false
+    }
+
+    const hash =
+        getStickerHash(m)
+
+    if (!hash) {
+        return false
+    }
+
+    const stickerCommands =
+        loadStickerCommands()
+
+    const command =
+        stickerCommands[hash]
+
+    if (!command) {
+        return false
+    }
+
+    if (
+        !command.text ||
+        typeof command.text !== 'string'
+    ) {
+        return false
+    }
+
+    const chat =
+        m.chat ||
+        m.key?.remoteJid ||
+        ''
+
+    if (!chat) {
+        return false
+    }
+
+    const mentions =
+        Array.isArray(
+            command.mentionedJid
+        )
+            ? command.mentionedJid
+            : []
+
+    await sock.sendMessage(
+        chat,
+        {
+            text: command.text,
+            mentions
+        },
+        {
+            quoted: m
+        }
+    )
+
+    return true
 }
 
 function commandMatches(
@@ -90,19 +219,12 @@ function commandMatches(
         return false
     }
 
-    if (
-        typeof command ===
-        'string'
-    ) {
-        return (
-            command.toLowerCase() ===
+    if (typeof command === 'string') {
+        return command.toLowerCase() ===
             used.toLowerCase()
-        )
     }
 
-    if (
-        Array.isArray(command)
-    ) {
+    if (Array.isArray(command)) {
         return command.some(
             item =>
                 commandMatches(
@@ -112,29 +234,21 @@ function commandMatches(
         )
     }
 
-    if (
-        command instanceof RegExp
-    ) {
+    if (command instanceof RegExp) {
         command.lastIndex = 0
 
-        return command.test(
-            used
-        )
+        return command.test(used)
     }
 
     return false
 }
 
 async function loadPlugins() {
-    if (
-        plugins.size > 0
-    ) {
+    if (plugins.size > 0) {
         return
     }
 
-    if (
-        pluginsLoading
-    ) {
+    if (pluginsLoading) {
         return pluginsLoading
     }
 
@@ -146,11 +260,7 @@ async function loadPlugins() {
                     'plugins'
                 )
 
-            if (
-                !fs.existsSync(
-                    pluginsDir
-                )
-            ) {
+            if (!fs.existsSync(pluginsDir)) {
                 fs.mkdirSync(
                     pluginsDir,
                     {
@@ -170,14 +280,8 @@ async function loadPlugins() {
                             )
                     )
 
-            for (
-                const file of files
-            ) {
-                if (
-                    plugins.has(
-                        file
-                    )
-                ) {
+            for (const file of files) {
+                if (plugins.has(file)) {
                     continue
                 }
 
@@ -217,16 +321,12 @@ async function loadPlugins() {
                     console.log(
                         `[PLUGIN] ${file} cargado.`
                     )
-                } catch (
-                    error
-                ) {
+                } catch (error) {
                     console.error(
                         `[PLUGIN] Error cargando ${file}:`
                     )
 
-                    console.error(
-                        error
-                    )
+                    console.error(error)
                 }
             }
 
@@ -247,8 +347,23 @@ async function processMessage(
     sock,
     rawMessage
 ) {
+    if (!rawMessage) {
+        return
+    }
+
     if (
-        !rawMessage
+        isBeforeHandlerStart(
+            sock,
+            rawMessage
+        )
+    ) {
+        return
+    }
+
+    if (
+        isOldMessage(
+            rawMessage
+        )
     ) {
         return
     }
@@ -262,9 +377,7 @@ async function processMessage(
                 rawMessage
             ) ||
             rawMessage
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.error(
             '[HANDLER] Error serializando mensaje:',
             error
@@ -278,10 +391,16 @@ async function processMessage(
     }
 
     if (
-        isOldMessage(
+        isBeforeHandlerStart(
             sock,
             m
         )
+    ) {
+        return
+    }
+
+    if (
+        isOldMessage(m)
     ) {
         return
     }
@@ -301,6 +420,56 @@ async function processMessage(
         m.participant ||
         chat ||
         ''
+
+    if (
+        !m.reply
+    ) {
+        Object.defineProperty(
+            m,
+            'reply',
+            {
+                value: async (
+                    replyText,
+                    options = {}
+                ) => {
+                    if (
+                        !sock ||
+                        !sock.sendMessage
+                    ) {
+                        return null
+                    }
+
+                    return sock.sendMessage(
+                        chat,
+                        {
+                            text: replyText,
+                            ...options
+                        },
+                        {
+                            quoted: m
+                        }
+                    )
+                },
+                configurable: true
+            }
+        )
+    }
+
+    if (
+        await processSticker(
+            sock,
+            m
+        )
+    ) {
+        return
+    }
+
+    const isBot =
+        isBotMessage(m)
+
+    if (isBot) {
+        return
+    }
 
     const text =
         typeof m.text === 'string'
@@ -335,9 +504,7 @@ async function processMessage(
     }
 
     const parts =
-        body.split(
-            /\s+/
-        )
+        body.split(/\s+/)
 
     const used =
         parts
@@ -348,53 +515,7 @@ async function processMessage(
         parts
 
     const senderNumber =
-        getNumber(
-            sender
-        )
-
-    const isBot =
-        isBotMessage(
-            m
-        )
-
-    if (
-        !m.reply
-    ) {
-        Object.defineProperty(
-            m,
-            'reply',
-            {
-                value:
-                    async (
-                        replyText,
-                        options = {}
-                    ) => {
-                        if (
-                            !sock ||
-                            !sock.sendMessage
-                        ) {
-                            return null
-                        }
-
-                        return sock.sendMessage(
-                            chat,
-                            {
-                                text:
-                                    replyText,
-                                ...options
-                            },
-                            {
-                                quoted:
-                                    m
-                            }
-                        )
-                    },
-
-                configurable:
-                    true
-            }
-        )
-    }
+        getNumber(sender)
 
     const pluginList =
         Array.from(
@@ -402,7 +523,8 @@ async function processMessage(
         )
 
     for (
-        const plugin of pluginList
+        const plugin
+        of pluginList
     ) {
         if (!plugin) {
             continue
@@ -418,17 +540,11 @@ async function processMessage(
         }
 
         const extra = {
-            command:
-                used,
-
+            command: used,
             prefix,
-
             text,
-
             body,
-
             senderNumber,
-
             isBot
         }
 
@@ -464,16 +580,12 @@ async function processMessage(
                     extra
                 )
             }
-        } catch (
-            error
-        ) {
+        } catch (error) {
             console.error(
                 `[PLUGIN] Error ejecutando ${plugin.__file || used}:`
             )
 
-            console.error(
-                error
-            )
+            console.error(error)
         }
 
         break
@@ -484,21 +596,19 @@ function runMessage(
     sock,
     message
 ) {
-    setImmediate(
-        () => {
-            processMessage(
-                sock,
-                message
-            ).catch(
-                error => {
-                    console.error(
-                        '[HANDLER] Error procesando mensaje:',
-                        error
-                    )
-                }
-            )
-        }
-    )
+    setImmediate(() => {
+        processMessage(
+            sock,
+            message
+        ).catch(
+            error => {
+                console.error(
+                    '[HANDLER] Error procesando mensaje:',
+                    error
+                )
+            }
+        )
+    })
 }
 
 async function handler(
@@ -515,7 +625,8 @@ async function handler(
     }
 
     for (
-        const message of update.messages
+        const message
+        of update.messages
     ) {
         runMessage(
             sock,
@@ -544,7 +655,7 @@ async function initHandler(
         return handler
     }
 
-    socketStartTimes.set(
+    messageCutoffs.set(
         sock,
         Date.now()
     )
