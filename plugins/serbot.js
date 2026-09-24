@@ -30,35 +30,8 @@ function normalizePhone(value) {
         return null
     }
 
-    if (
-        typeof value === 'object'
-    ) {
-        value =
-            value.jid ||
-            value.id ||
-            value.phoneNumber ||
-            value.phone ||
-            value.user ||
-            value.pn
-    }
-
-    if (!value) {
-        return null
-    }
-
-    const text =
-        String(value).trim()
-
-    if (
-        text.endsWith('@lid')
-    ) {
-        return null
-    }
-
     const phone =
-        text
-            .split('@')[0]
-            .split(':')[0]
+        String(value)
             .replace(/\D/g, '')
 
     if (
@@ -71,243 +44,10 @@ function normalizePhone(value) {
     return phone
 }
 
-function normalizeJid(value) {
-    if (!value) {
-        return null
-    }
-
-    if (
-        typeof value === 'object'
-    ) {
-        value =
-            value.jid ||
-            value.id ||
-            value.lid ||
-            value.pn ||
-            value.phoneNumber ||
-            value.phone
-    }
-
-    if (!value) {
-        return null
-    }
-
-    return String(value).trim()
-}
-
-function getLid(m) {
-    const candidates = [
-        m?.key?.participant,
-        m?.key?.senderPn,
-        m?.key?.participantPn,
-        m?.key?.remoteJid,
-        m?.participant,
-        m?.sender
-    ]
-
-    for (
-        const value of candidates
-    ) {
-        const jid =
-            normalizeJid(value)
-
-        if (
-            jid?.endsWith('@lid')
-        ) {
-            return jid
-        }
-    }
-
-    return null
-}
-
-function getDirectPhoneCandidates(m) {
-    return [
-        m?.key?.participantAlt,
-        m?.key?.remoteJidAlt,
-        m?.key?.senderPn,
-        m?.key?.participantPn,
-        m?.key?.participantPhone,
-        m?.key?.senderPhone,
-        m?.participantAlt,
-        m?.participantPn,
-        m?.senderPn,
-        m?.senderPn?.jid,
-        m?.senderPn?.user,
-        m?.senderPhone,
-        m?.participantPhone
-    ]
-}
-
-async function getPhoneFromLid(
-    conn,
-    m
-) {
-    const lid =
-        getLid(m)
-
-    if (!lid) {
-        return null
-    }
-
-    console.log(
-        `[CODE] Intentando resolver LID: ${lid}`
-    )
-
-    const directCandidates =
-        getDirectPhoneCandidates(m)
-
-    for (
-        const value of directCandidates
-    ) {
-        const phone =
-            normalizePhone(value)
-
-        if (phone) {
-            console.log(
-                `[CODE] Número encontrado directamente: +${phone}`
-            )
-
-            return phone
-        }
-    }
-
-    try {
-        const mapping =
-            conn
-                ?.signalRepository
-                ?.lidMapping
-
-        if (
-            mapping &&
-            typeof mapping.getPNForLID ===
-            'function'
-        ) {
-            const result =
-                await mapping.getPNForLID(
-                    lid
-                )
-
-            const phone =
-                normalizePhone(result)
-
-            if (phone) {
-                console.log(
-                    `[CODE] Número encontrado mediante lidMapping: +${phone}`
-                )
-
-                return phone
-            }
-        }
-    } catch (error) {
-        console.log(
-            `[CODE] Error en lidMapping: ${error?.message || error}`
-        )
-    }
-
-    if (
-        m?.chat?.endsWith('@g.us')
-    ) {
-        try {
-            console.log(
-                `[CODE] Buscando LID en metadatos del grupo: ${m.chat}`
-            )
-
-            const metadata =
-                await conn.groupMetadata(
-                    m.chat
-                )
-
-            const participants =
-                metadata?.participants ||
-                []
-
-            for (
-                const participant of participants
-            ) {
-                const ids = [
-                    participant?.id,
-                    participant?.jid,
-                    participant?.lid,
-                    participant?.participant,
-                    participant?.participantPn,
-                    participant?.phoneNumber,
-                    participant?.phone
-                ]
-
-                const matches =
-                    ids.some(
-                        value => {
-                            const jid =
-                                normalizeJid(
-                                    value
-                                )
-
-                            return (
-                                jid === lid ||
-                                jid?.split('@')[0] ===
-                                    lid.split('@')[0]
-                            )
-                        }
-                    )
-
-                if (!matches) {
-                    continue
-                }
-
-                const phoneCandidates = [
-                    participant?.phoneNumber,
-                    participant?.phone,
-                    participant?.participantPn,
-                    participant?.jid,
-                    participant?.id
-                ]
-
-                for (
-                    const value of phoneCandidates
-                ) {
-                    const phone =
-                        normalizePhone(value)
-
-                    if (phone) {
-                        console.log(
-                            `[CODE] Número encontrado en metadatos del grupo: +${phone}`
-                        )
-
-                        return phone
-                    }
-                }
-            }
-        } catch (error) {
-            console.log(
-                `[CODE] Error consultando grupo: ${error?.message || error}`
-            )
-        }
-    }
-
-    try {
-        const mapping =
-            conn
-                ?.signalRepository
-                ?.lidMapping
-
-        if (
-            mapping &&
-            typeof mapping.getLIDForPN ===
-            'function'
-        ) {
-            console.log(
-                '[CODE] El mapeo LID todavía no existe. Se revisarán los mapeos disponibles.'
-            )
-        }
-    } catch {}
-
-    return null
-}
-
 handler.run = async (
     conn,
-    m
+    m,
+    args
 ) => {
     const isMainBot =
         conn?.isMainBot === true ||
@@ -317,48 +57,36 @@ handler.run = async (
         return
     }
 
-    let phone = null
-
-    const directCandidates = [
-        m?.key?.participantAlt,
-        m?.key?.remoteJidAlt,
-        m?.key?.senderPn,
-        m?.key?.participantPn,
-        m?.key?.participantPhone,
-        m?.key?.senderPhone,
-        m?.participantAlt,
-        m?.participantPn,
-        m?.senderPn,
-        m?.senderPn?.jid,
-        m?.senderPn?.user
-    ]
-
-    for (
-        const value of directCandidates
+    if (
+        !args ||
+        !args.length
     ) {
-        const result =
-            normalizePhone(value)
+        await conn.sendMessage(
+            m.chat,
+            {
+                text:
+                    '❌ Debes escribir el número que quieres vincular.\n\nEjemplos:\n\n.code +52 12 3456 7890\n.code 521234567890\n.code +52-12-3456-7890'
+            },
+            {
+                quoted: m
+            }
+        )
 
-        if (result) {
-            phone = result
-            break
-        }
+        return
     }
 
-    if (!phone) {
-        phone =
-            await getPhoneFromLid(
-                conn,
-                m
-            )
-    }
+    const input =
+        args.join(' ')
+
+    const phone =
+        normalizePhone(input)
 
     if (!phone) {
         await conn.sendMessage(
             m.chat,
             {
                 text:
-                    '❌ No pude obtener el número telefónico asociado a tu cuenta de WhatsApp.\n\nWhatsApp solamente proporcionó el identificador LID y Baileys todavía no tiene un mapeo LID → número para este usuario.'
+                    '❌ El número no es válido.\n\nPuedes escribirlo con +, espacios, guiones o completamente limpio.'
             },
             {
                 quoted: m
@@ -369,7 +97,7 @@ handler.run = async (
     }
 
     console.log(
-        `[CODE] Número final para vincular: +${phone}`
+        `[CODE] Número solicitado: +${phone}`
     )
 
     if (
@@ -408,9 +136,9 @@ handler.run = async (
 
                 const number =
                     normalizePhone(
+                        socket.subBotNumber ||
                         socket.subBotJid ||
-                        socket.user?.id ||
-                        socket.subBotNumber
+                        socket.user?.id
                     )
 
                 return number === phone
@@ -422,7 +150,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    `🟢 Tu número +${phone} ya está conectado como SubBot.`
+                    `🟢 El número +${phone} ya está conectado como SubBot.`
             },
             {
                 quoted: m
@@ -441,7 +169,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    `📁 Ya existe una sesión guardada para +${phone}.\n\nElimina esa sesión antes de volver a vincularla.`
+                    `📁 Ya existe una sesión guardada para +${phone}.\n\nSi quieres volver a vincularlo, elimina primero la carpeta:\n\nsessions/subbots/${phone}`
             },
             {
                 quoted: m
@@ -540,32 +268,6 @@ handler.run = async (
             saveCreds
         )
 
-        socket.ev.on(
-            'lid-mapping.update',
-            update => {
-                try {
-                    if (!update) {
-                        return
-                    }
-
-                    const lid =
-                        update.lid
-
-                    const pn =
-                        update.pn
-
-                    if (
-                        lid &&
-                        pn
-                    ) {
-                        console.log(
-                            `[LID] Mapeo recibido: ${lid} -> ${pn}`
-                        )
-                    }
-                } catch {}
-            }
-        )
-
         global.conns =
             global.conns || []
 
@@ -611,7 +313,7 @@ handler.run = async (
                             PAIRING_IMAGE
                     },
                     caption:
-                        `🔐 *Código de vinculación*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*`
+                        `🔐 *CÓDIGO DE VINCULACIÓN*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*`
                 },
                 {
                     quoted: m
@@ -627,6 +329,10 @@ handler.run = async (
                 {
                     quoted: m
                 }
+            )
+
+            console.log(
+                `[CODE] Código generado para +${phone}: ${code}`
             )
         }
 
@@ -764,7 +470,7 @@ handler.run = async (
                 m.chat,
                 {
                     text:
-                        `❌ No se pudo generar el código de vinculación para +${phone}.`
+                        `❌ No se pudo generar el código para +${phone}.`
                 },
                 {
                     quoted: m
