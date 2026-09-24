@@ -2,12 +2,15 @@ import fs from 'fs'
 import path from 'path'
 import pino from 'pino'
 
-import {
+import * as baileys from '@whiskeysockets/baileys'
+
+const {
     useMultiFileAuthState,
     makeCacheableSignalKeyStore,
     makeWASocket,
-    DisconnectReason
-} from '@whiskeysockets/baileys'
+    DisconnectReason,
+    fetchLatestWaWebVersion
+} = baileys
 
 const SUBBOTS_DIR = path.join(
     process.cwd(),
@@ -41,6 +44,15 @@ function normalizePhone(value) {
     }
 
     return phone
+}
+
+function getStatusCode(error) {
+    return (
+        error?.output?.statusCode ??
+        error?.data?.statusCode ??
+        error?.statusCode ??
+        error?.output?.payload?.statusCode
+    )
 }
 
 handler.run = async (
@@ -124,8 +136,11 @@ handler.run = async (
             'creds.json'
         )
 
+    global.conns =
+        global.conns || []
+
     const connected =
-        global.conns?.find(
+        global.conns.find(
             socket => {
                 if (
                     !socket?.isSubBot
@@ -188,6 +203,10 @@ handler.run = async (
     let socket = null
 
     try {
+        console.log(
+            `[CODE] Preparando sesión para +${phone}...`
+        )
+
         const {
             state,
             saveCreds
@@ -196,11 +215,49 @@ handler.run = async (
                 sessionPath
             )
 
-        const version = [
-    2,
-    3000,
-    1027934701
-]
+        let version
+
+        if (
+            typeof fetchLatestWaWebVersion ===
+            'function'
+        ) {
+            console.log(
+                '[CODE] Obteniendo versión actual de WhatsApp Web...'
+            )
+
+            const result =
+                await fetchLatestWaWebVersion()
+
+            version =
+                result?.version
+
+            console.log(
+                `[CODE] WhatsApp Web: ${version?.join('.') || 'desconocida'}`
+            )
+        } else {
+            console.log(
+                '[CODE] fetchLatestWaWebVersion no está disponible. Usando versión de respaldo.'
+            )
+
+            version = [
+                2,
+                3000,
+                1042466098
+            ]
+        }
+
+        if (
+            !Array.isArray(version) ||
+            version.length !== 3
+        ) {
+            throw new Error(
+                'No se pudo obtener una versión válida de WhatsApp Web.'
+            )
+        }
+
+        console.log(
+            '[CODE] Creando socket...'
+        )
 
         socket =
             makeWASocket({
@@ -225,9 +282,9 @@ handler.run = async (
                     }),
 
                 browser: [
-                    'Exclusive Bot',
                     'Chrome',
-                    '1.0.0'
+                    'Chrome',
+                    '120.0.0.0'
                 ],
 
                 version,
@@ -239,7 +296,13 @@ handler.run = async (
                     true,
 
                 generateHighQualityLinkPreview:
-                    true
+                    true,
+
+                connectTimeoutMs:
+                    60000,
+
+                defaultQueryTimeoutMs:
+                    60000
             })
 
         socket.isSubBot =
@@ -268,9 +331,6 @@ handler.run = async (
             saveCreds
         )
 
-        global.conns =
-            global.conns || []
-
         if (
             !global.conns.includes(
                 socket
@@ -281,21 +341,51 @@ handler.run = async (
             )
         }
 
+        console.log(
+            '[CODE] Socket creado correctamente.'
+        )
+
         await new Promise(
             resolve =>
                 setTimeout(
                     resolve,
-                    1500
+                    3000
                 )
         )
 
         if (
             !state.creds.registered
         ) {
-            let code =
-                await socket.requestPairingCode(
-                    phone
+            console.log(
+                `[CODE] Solicitando pairing code para +${phone}...`
+            )
+
+            let code
+
+            try {
+                code =
+                    await socket.requestPairingCode(
+                        phone
+                    )
+            } catch (error) {
+                const statusCode =
+                    getStatusCode(error)
+
+                console.error(
+                    '[CODE] Error en requestPairingCode:'
                 )
+
+                console.error(
+                    error?.stack ||
+                    error
+                )
+
+                console.error(
+                    `[CODE] StatusCode: ${statusCode ?? 'desconocido'}`
+                )
+
+                throw error
+            }
 
             code =
                 code
@@ -304,6 +394,10 @@ handler.run = async (
                     )
                     ?.join('-') ||
                 code
+
+            console.log(
+                `[CODE] Código generado para +${phone}: ${code}`
+            )
 
             await conn.sendMessage(
                 m.chat,
@@ -330,9 +424,9 @@ handler.run = async (
                     quoted: m
                 }
             )
-
+        } else {
             console.log(
-                `[CODE] Código generado para +${phone}: ${code}`
+                `[CODE] La sesión +${phone} ya estaba registrada.`
             )
         }
 
@@ -369,15 +463,9 @@ handler.run = async (
                     false
 
                 const statusCode =
-                    lastDisconnect
-                        ?.error
-                        ?.output
-                        ?.statusCode ??
-                    lastDisconnect
-                        ?.error
-                        ?.output
-                        ?.payload
-                        ?.statusCode
+                    getStatusCode(
+                        lastDisconnect?.error
+                    )
 
                 const index =
                     global.conns.indexOf(
@@ -427,10 +515,17 @@ handler.run = async (
             }
         )
     } catch (error) {
+        const statusCode =
+            getStatusCode(error)
+
         console.error(
             `[SUBBOT] Error iniciando +${phone}:`,
             error?.message ||
             error
+        )
+
+        console.error(
+            `[SUBBOT] Código HTTP/estado: ${statusCode ?? 'desconocido'}`
         )
 
         if (socket) {
@@ -470,7 +565,7 @@ handler.run = async (
                 m.chat,
                 {
                     text:
-                        `❌ No se pudo generar el código para +${phone}.`
+                        `❌ No se pudo generar el código para +${phone}.\n\nEstado: ${statusCode ?? 'desconocido'}`
                 },
                 {
                     quoted: m
