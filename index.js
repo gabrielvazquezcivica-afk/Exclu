@@ -1,589 +1,299 @@
-import fs from 'fs'
-import path from 'path'
-import { pathToFileURL } from 'url'
-import chalk from 'chalk'
-
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import {
-  connect,
-  setOwnMessageHandler
-} from './lib/connection.js'
+  watchFile,
+  unwatchFile,
+  existsSync,
+  mkdirSync
+} from 'fs'
+import cfonts from 'cfonts'
+import { createInterface } from 'readline'
+import yargs from 'yargs'
+import chalk from 'chalk'
+import { spawn } from 'child_process'
 
-const PREFIX = '.'
+const __dirname = dirname(
+  fileURLToPath(import.meta.url)
+)
 
-const ROOT = process.cwd()
-const PLUGINS_DIR = path.join(ROOT, 'plugins')
-const LIB_DIR = path.join(ROOT, 'lib')
-const DATABASE_DIR = path.join(ROOT, 'database')
+const { say } = cfonts
 
-const START_TIME = Date.now()
+const rl = createInterface(
+  process.stdin,
+  process.stdout
+)
 
-const plugins = new Map()
-const commandQueue = []
+// Crear carpetas necesarias
 
-let processingQueue = false
-let sock = null
-
-global.plugins = plugins
-global.conns = global.conns || []
-
-global.botStartTime = START_TIME
-global.commandQueue = commandQueue
-
-const specialCommands = new Map()
-
-function ensureDirectories() {
-  const directories = [
-    PLUGINS_DIR,
-    LIB_DIR,
-    DATABASE_DIR
+function verify() {
+  const dirs = [
+    'tmp',
+    'sessions',
+    'sessions/exclusive',
+    'sessions/subbots',
+    'plugins',
+    'lib',
+    'database'
   ]
 
-  for (const directory of directories) {
-    if (!fs.existsSync(directory)) {
-      fs.mkdirSync(directory, { recursive: true })
-    }
-  }
-}
+  for (const dir of dirs) {
+    const folder = join(__dirname, dir)
 
-function getText(message) {
-  if (!message) return ''
-
-  if (typeof message.conversation === 'string') {
-    return message.conversation
-  }
-
-  if (message.extendedTextMessage?.text) {
-    return message.extendedTextMessage.text
-  }
-
-  if (message.imageMessage?.caption) {
-    return message.imageMessage.caption
-  }
-
-  if (message.videoMessage?.caption) {
-    return message.videoMessage.caption
-  }
-
-  if (message.documentMessage?.caption) {
-    return message.documentMessage.caption
-  }
-
-  return ''
-}
-
-function getMessageText(m) {
-  if (!m?.message) return ''
-  return getText(m.message)
-}
-
-function getSender(m) {
-  if (!m?.key) return 'Desconocido'
-
-  if (m.key.participant) {
-    return m.key.participant
-  }
-
-  if (m.key.remoteJid) {
-    return m.key.remoteJid
-  }
-
-  return 'Desconocido'
-}
-
-function getPhone(jid) {
-  if (!jid) return 'Desconocido'
-
-  return jid
-    .split('@')[0]
-    .replace(/\D/g, '') || 'Desconocido'
-}
-
-function isGroup(m) {
-  return m?.key?.remoteJid?.endsWith('@g.us') === true
-}
-
-async function getGroupName(m) {
-  if (!isGroup(m) || !sock) {
-    return 'Chat privado'
-  }
-
-  try {
-    const metadata = await sock.groupMetadata(m.key.remoteJid)
-    return metadata?.subject || 'Grupo desconocido'
-  } catch {
-    return 'Grupo desconocido'
-  }
-}
-
-function isBotMessage(m) {
-  if (!m?.key) return false
-
-  if (m.key.fromMe === true) {
-    return true
-  }
-
-  const sender = m.key.participant || m.key.remoteJid
-
-  if (!sender || !sock?.user?.id) {
-    return false
-  }
-
-  const botNumber = sock.user.id.split(':')[0]
-  const senderNumber = sender.split('@')[0].split(':')[0]
-
-  return botNumber === senderNumber
-}
-
-function parseCommand(text) {
-  if (!text || !text.startsWith(PREFIX)) {
-    return null
-  }
-
-  const withoutPrefix = text.slice(PREFIX.length).trim()
-
-  if (!withoutPrefix) {
-    return null
-  }
-
-  const parts = withoutPrefix.split(/\s+/)
-
-  const command = parts.shift()?.toLowerCase()
-
-  if (!command) {
-    return null
-  }
-
-  return {
-    command,
-    args: parts
-  }
-}
-
-function parseSpecialCommand(text) {
-  if (!text) return null
-
-  const clean = text.trim().toLowerCase()
-
-  if (!specialCommands.has(clean)) {
-    return null
-  }
-
-  return {
-    command: specialCommands.get(clean),
-    args: []
-  }
-}
-
-function normalizeCommands(command) {
-  if (!command) return []
-
-  if (Array.isArray(command)) {
-    return command
-      .filter(Boolean)
-      .map(item => String(item).toLowerCase())
-  }
-
-  return [String(command).toLowerCase()]
-}
-
-async function loadPlugins() {
-  if (!fs.existsSync(PLUGINS_DIR)) {
-    return
-  }
-
-  const files = fs
-    .readdirSync(PLUGINS_DIR)
-    .filter(file => file.endsWith('.js'))
-
-  for (const file of files) {
-    await loadPlugin(file)
-  }
-
-  console.log(
-    chalk.green(`[PLUGINS] ${plugins.size} comando(s) cargado(s).`)
-  )
-}
-
-async function loadPlugin(file) {
-  const filePath = path.join(PLUGINS_DIR, file)
-
-  try {
-    const url = `${pathToFileURL(filePath).href}?update=${Date.now()}`
-
-    const imported = await import(url)
-
-    const handler =
-      imported.default ||
-      imported.handler
-
-    if (!handler) {
-      console.log(
-        chalk.yellow(`[PLUGINS] ${file} no exporta un handler.`)
-      )
-      return
-    }
-
-    const commands = normalizeCommands(handler.command)
-
-    if (commands.length === 0) {
-      console.log(
-        chalk.yellow(`[PLUGINS] ${file} no tiene handler.command.`)
-      )
-      return
-    }
-
-    for (const command of commands) {
-      plugins.set(command, {
-        ...handler,
-        file
+    if (!existsSync(folder)) {
+      mkdirSync(folder, {
+        recursive: true
       })
     }
-
-    console.log(
-      chalk.cyan(`[PLUGIN] ${file} → ${commands.join(', ')}`)
-    )
-  } catch (error) {
-    console.error(
-      chalk.red(`[PLUGINS] Error cargando ${file}:`),
-      error.message
-    )
   }
 }
 
-async function reloadPlugin(file) {
-  const filePath = path.join(PLUGINS_DIR, file)
+verify()
 
-  if (!fs.existsSync(filePath)) {
-    return
-  }
+// Banner de Exclusive Bot
 
-  for (const [command, plugin] of plugins.entries()) {
-    if (plugin.file === file) {
-      plugins.delete(command)
-    }
-  }
+say('exclusive bot', {
+  font: 'block',
+  align: 'center',
+  colors: ['cyan', 'white'],
+  background: 'black'
+})
 
-  await loadPlugin(file)
-}
+say('Exclusive Bot', {
+  font: 'console',
+  align: 'center',
+  colors: ['magenta']
+})
 
-function watchPlugins() {
-  fs.watch(
-    PLUGINS_DIR,
-    async (event, filename) => {
-      if (!filename || !filename.endsWith('.js')) {
-        return
-      }
+// Variables del proceso
 
-      if (event === 'change' || event === 'rename') {
-        setTimeout(async () => {
-          try {
-            await reloadPlugin(filename)
-            console.log(
-              chalk.green(`[PLUGINS] Recargado: ${filename}`)
-            )
-          } catch (error) {
-            console.error(
-              chalk.red(`[PLUGINS] Error recargando ${filename}:`),
-              error.message
-            )
-          }
-        }, 300)
-      }
-    }
+let isRunning = false
+let child = null
+
+// Iniciar main.js
+
+function start(file) {
+  if (isRunning) return
+
+  isRunning = true
+
+  const filePath = join(
+    __dirname,
+    file
   )
-}
 
-function commandLog(m, text, groupName) {
-  const sender = getSender(m)
-  const phone = getPhone(sender)
-
-  const pushName =
-    m?.pushName ||
-    m?.verifiedBizName ||
-    'Usuario'
-
-  const type = isGroup(m)
-    ? 'GRUPO'
-    : 'PRIVADO'
+  const args = [
+    filePath,
+    ...process.argv.slice(2)
+  ]
 
   console.log('')
-  console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'))
-  console.log(chalk.cyan('⚡ NUEVO COMANDO'))
-  console.log(chalk.white(`👤 Usuario: ${pushName}`))
-  console.log(chalk.white(`📱 Número: +${phone}`))
-  console.log(chalk.white(`💬 Tipo: ${type}`))
-  console.log(chalk.white(`📍 Lugar: ${groupName}`))
-  console.log(chalk.white(`📝 Comando: ${text}`))
-  console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'))
-}
 
-function enqueueCommand(data) {
-  commandQueue.push(data)
-  processQueue()
-}
+  console.log(
+    chalk.cyan(
+      '[EXCLUSIVE] Iniciando main.js...'
+    )
+  )
 
-async function processQueue() {
-  if (processingQueue) return
+  console.log('')
 
-  processingQueue = true
-
-  while (commandQueue.length > 0) {
-    const data = commandQueue.shift()
-
-    try {
-      await executeCommand(data)
-    } catch (error) {
-      console.error(
-        chalk.red('[COMMAND] Error:'),
-        error
-      )
-    }
-  }
-
-  processingQueue = false
-}
-
-async function executeCommand(data) {
-  const {
-    m,
-    command,
+  child = spawn(
+    process.execPath,
     args,
-    text
-  } = data
-
-  const plugin = plugins.get(command)
-
-  if (!plugin) {
-    return
-  }
-
-  if (typeof plugin.run !== 'function') {
-    console.log(
-      chalk.yellow(`[COMMAND] ${command} no tiene handler.run`)
-    )
-    return
-  }
-
-  const groupName = await getGroupName(m)
-
-  commandLog(
-    m,
-    text,
-    groupName
-  )
-
-  await plugin.run(
-    sock,
-    m,
-    args
-  )
-}
-
-function registerSpecialCommands() {
-  // Los alias especiales pueden agregarse aquí.
-  // Ejemplo:
-  // specialCommands.set('hola bot', 'menu')
-}
-
-function handleIncomingMessage(m) {
-  if (!m?.key) {
-    return
-  }
-
-  if (isBotMessage(m)) {
-    return
-  }
-
-  const messageTimestamp =
-    Number(m.messageTimestamp || 0) * 1000
-
-  if (
-    messageTimestamp &&
-    messageTimestamp < START_TIME
-  ) {
-    return
-  }
-
-  const text = getMessageText(m)
-
-  if (!text) {
-    return
-  }
-
-  const commandData =
-    parseCommand(text) ||
-    parseSpecialCommand(text)
-
-  if (!commandData) {
-    return
-  }
-
-  if (!plugins.has(commandData.command)) {
-    return
-  }
-
-  enqueueCommand({
-    m,
-    command: commandData.command,
-    args: commandData.args,
-    text
-  })
-}
-
-function setupOwnMessageHandler() {
-  try {
-    if (typeof setOwnMessageHandler === 'function') {
-      setOwnMessageHandler(message => {
-        return
-      })
+    {
+      cwd: __dirname,
+      stdio: [
+        'inherit',
+        'inherit',
+        'inherit',
+        'ipc'
+      ]
     }
-  } catch (error) {
-    console.error(
-      chalk.yellow('[INDEX] No se pudo configurar ownMessageHandler:'),
-      error.message
-    )
-  }
-}
+  )
 
-function setupIPC() {
-  if (!process.send) {
-    return
-  }
+  // Mensajes enviados desde main.js
 
-  process.on('message', async data => {
-    if (!data) return
-
-    if (typeof data === 'string') {
+  child.on(
+    'message',
+    data => {
       if (data === 'reset') {
-        process.send?.('reset')
+        try {
+          child.kill()
+        } catch {}
+
+        isRunning = false
+        start(file)
         return
       }
 
       if (data === 'uptime') {
-        process.send?.({
-          type: 'uptime',
-          value: process.uptime()
-        })
+        if (
+          child &&
+          child.connected
+        ) {
+          child.send(
+            process.uptime()
+          )
+        }
+
         return
       }
 
-      return
+      if (
+        data &&
+        typeof data === 'object' &&
+        data.type === 'reset'
+      ) {
+        try {
+          child.kill()
+        } catch {}
+
+        isRunning = false
+        start(file)
+      }
     }
-
-    if (data.type === 'uptime') {
-      process.send?.({
-        type: 'uptime',
-        value: process.uptime()
-      })
-    }
-  })
-}
-
-async function start() {
-  ensureDirectories()
-
-  console.log(
-    chalk.cyan('[INDEX] Iniciando Exclusive Bot...')
   )
 
-  console.log(
-    chalk.gray(`[INDEX] Inicio: ${new Date(START_TIME).toLocaleString()}`)
+  // Error del proceso
+
+  child.on(
+    'error',
+    error => {
+      console.error(
+        chalk.red(
+          '[EXCLUSIVE] Error iniciando main.js:'
+        ),
+        error?.message || error
+      )
+    }
   )
 
-  registerSpecialCommands()
+  // Cuando main.js termina
 
-  await loadPlugins()
+  child.on(
+    'exit',
+    (code, signal) => {
+      isRunning = false
+      child = null
 
-  watchPlugins()
+      if (
+        signal === 'SIGINT' ||
+        signal === 'SIGTERM'
+      ) {
+        return
+      }
 
-  setupIPC()
+      console.error(
+        chalk.red(
+          `[EXCLUSIVE] main.js terminó con código: ${code ?? 'null'}`
+        )
+      )
 
-  setupOwnMessageHandler()
-
-  try {
-    sock = await connect()
-
-    if (!sock) {
-      throw new Error('connection.js no devolvió un socket')
+      process.exit(
+        code ?? 0
+      )
     }
+  )
 
-    global.sock = sock
+  // Recibir comandos enviados desde la consola
 
-    console.log(
-      chalk.green('[INDEX] Socket principal iniciado.')
-    )
+  const opts = yargs(
+    process.argv.slice(2)
+  )
+    .exitProcess(false)
+    .parse()
 
-    console.log(
-      chalk.green(`[INDEX] Comandos disponibles: ${plugins.size}`)
-    )
-
-    if (sock.ev) {
-      sock.ev.on(
-        'messages.upsert',
-        async update => {
-          if (!update?.messages) return
-
-          for (const message of update.messages) {
-            handleIncomingMessage(message)
+  if (!opts.test) {
+    if (!rl.listenerCount('line')) {
+      rl.on(
+        'line',
+        line => {
+          if (
+            child &&
+            child.connected
+          ) {
+            child.send(
+              line.trim()
+            )
           }
         }
       )
     }
-
-    console.log(
-      chalk.green('[INDEX] Sistema de comandos activo.')
-    )
-  } catch (error) {
-    console.error(
-      chalk.red('[INDEX] Error iniciando el bot:')
-    )
-
-    console.error(error)
-
-    setTimeout(() => {
-      if (process.send) {
-        process.send('reset')
-      } else {
-        process.exit(1)
-      }
-    }, 5000)
   }
+
+  // Vigilar cambios en main.js
+
+  watchFile(
+    filePath,
+    () => {
+      unwatchFile(filePath)
+
+      console.log(
+        chalk.yellow(
+          '[EXCLUSIVE] main.js fue modificado. Reiniciando...'
+        )
+      )
+
+      if (child) {
+        try {
+          child.kill()
+        } catch {}
+      }
+
+      isRunning = false
+      start(file)
+    }
+  )
 }
 
-process.on('uncaughtException', error => {
-  console.error(
-    chalk.red('[INDEX] Uncaught Exception:')
-  )
+// Advertencia de demasiados listeners
 
-  console.error(error)
-})
+process.on(
+  'warning',
+  warning => {
+    if (
+      warning.name ===
+      'MaxListenersExceededWarning'
+    ) {
+      console.warn(
+        chalk.yellow(
+          '⚠️ Se excedió el límite de listeners.'
+        )
+      )
 
-process.on('unhandledRejection', error => {
-  console.error(
-    chalk.red('[INDEX] Unhandled Rejection:')
-  )
+      console.warn(
+        warning.stack
+      )
+    }
+  }
+)
 
-  console.error(error)
-})
+// Cerrar correctamente
 
-process.on('SIGINT', () => {
-  console.log(
-    chalk.yellow('[INDEX] Cerrando Exclusive Bot...')
-  )
+process.on(
+  'SIGINT',
+  () => {
+    console.log('')
 
-  try {
-    sock?.ws?.close()
-  } catch {}
+    console.log(
+      chalk.yellow(
+        '[EXCLUSIVE] Cerrando bot...'
+      )
+    )
 
-  process.exit(0)
-})
+    if (child) {
+      try {
+        child.kill()
+      } catch {}
+    }
 
-process.on('SIGTERM', () => {
-  try {
-    sock?.ws?.close()
-  } catch {}
+    try {
+      rl.close()
+    } catch {}
 
-  process.exit(0)
-})
+    process.exit(0)
+  }
+)
 
-start()
+// Iniciar el bot
+
+start('main.js')
