@@ -2,193 +2,225 @@ import fs from 'fs'
 import path from 'path'
 
 const SUBBOTS_DIR = path.join(
-    process.cwd(),
-    'sessions',
-    'subbots'
+process.cwd(),
+'sessions',
+'subbots'
 )
 
 let handler = {}
 
 handler.command = [
-    'deletesesion',
-    'deletebot',
-    'deletesession',
-    'deletesesaion',
-    'stop',
-    'pausarai',
-    'pausarbot',
-    'bots',
-    'listjadibots',
-    'subbots'
+'deletesesion',
+'deletebot',
+'deletesession',
+'deletesesaion',
+'stop',
+'pausarai',
+'pausarbot',
+'bots',
+'listjadibots',
+'subbots'
 ]
 
 function getNumber(jid) {
-    if (!jid) return ''
+if (!jid) {
+return ''
+}
 
-    return String(jid)
-        .split(':')[0]
-        .split('@')[0]
-        .replace(/\D/g, '')
+return String(jid)
+    .split(':')[0]
+    .split('@')[0]
+    .replace(/\D/g, '')
+
+}
+
+function isMainBot(sock) {
+return Boolean(
+sock?.isMainBot === true ||
+sock === global.conn
+)
+}
+
+function isOwner(m, extra) {
+if (extra?.isOwner === true) {
+return true
+}
+
+if (m?.isOwner === true) {
+    return true
+}
+
+if (m?.senderNumber && global.owner) {
+    const sender =
+        String(m.senderNumber)
+            .replace(/\D/g, '')
+
+    const owners = Array.isArray(global.owner)
+        ? global.owner
+        : [global.owner]
+
+    return owners.some(owner => {
+        const number =
+            typeof owner === 'object'
+                ? owner?.number ||
+                  owner?.id ||
+                  owner?.jid
+                : owner
+
+        return (
+            getNumber(number) ===
+            sender
+        )
+    })
+}
+
+return false
+
 }
 
 function getState(socket) {
-    if (!socket?.ws?.socket) {
-        return '🔴 Desconectado'
-    }
+if (!socket?.ws?.socket) {
+return '🔴 Desconectado'
+}
 
-    const state =
-        socket.ws.socket.readyState
+const state =
+    socket.ws.socket.readyState
 
-    if (state === 0) {
-        return '🟡 Conectando'
-    }
+if (state === 0) return '🟡 Conectando'
+if (state === 1) return '🟢 Activo'
+if (state === 2) return '🟠 Cerrando'
+if (state === 3) return '🔴 Cerrado'
 
-    if (state === 1) {
-        return '🟢 Activo'
-    }
+return '⚪ Desconocido'
 
-    if (state === 2) {
-        return '🟠 Cerrando'
-    }
-
-    if (state === 3) {
-        return '🔴 Cerrado'
-    }
-
-    return '⚪ Desconocido'
 }
 
 function formatTime(startTime) {
-    if (
-        !startTime ||
-        Number.isNaN(
-            Number(startTime)
-        )
-    ) {
-        return '0s'
-    }
+if (!startTime) {
+return 'Desconocido'
+}
 
-    const elapsed =
-        Math.max(
-            0,
-            Date.now() -
-                Number(startTime)
-        )
+const elapsed =
+    Date.now() - startTime
 
-    const totalSeconds =
-        Math.floor(
-            elapsed / 1000
-        )
+if (elapsed < 0) {
+    return '0 segundos'
+}
 
-    const days =
-        Math.floor(
-            totalSeconds / 86400
-        )
+const seconds =
+    Math.floor(elapsed / 1000)
 
-    const hours =
-        Math.floor(
-            (totalSeconds % 86400) /
-                3600
-        )
+const minutes =
+    Math.floor(seconds / 60)
 
-    const minutes =
-        Math.floor(
-            (totalSeconds % 3600) /
-                60
-        )
+const hours =
+    Math.floor(minutes / 60)
 
-    const seconds =
-        totalSeconds % 60
+const days =
+    Math.floor(hours / 24)
 
-    const parts = []
+if (days > 0) {
+    return `${days} día(s), ${hours % 24} hora(s)`
+}
 
-    if (days > 0) {
-        parts.push(`${days}d`)
-    }
+if (hours > 0) {
+    return `${hours} hora(s), ${minutes % 60} minuto(s)`
+}
 
-    if (hours > 0) {
-        parts.push(`${hours}h`)
-    }
+if (minutes > 0) {
+    return `${minutes} minuto(s), ${seconds % 60} segundo(s)`
+}
 
-    if (minutes > 0) {
-        parts.push(`${minutes}m`)
-    }
+return `${seconds} segundo(s)`
 
-    if (
-        seconds > 0 ||
-        parts.length === 0
-    ) {
-        parts.push(`${seconds}s`)
-    }
-
-    return parts.join(' ')
 }
 
 function getStartTime(socket) {
-    if (
-        socket?.connectionStartTime
-    ) {
-        return Number(
-            socket.connectionStartTime
-        )
-    }
+if (socket?.startTime) {
+return socket.startTime
+}
 
-    if (
-        socket?.startTime
-    ) {
-        return Number(
-            socket.startTime
-        )
-    }
+if (socket?.connectedAt) {
+    return socket.connectedAt
+}
 
-    if (
-        socket?.uptime
-    ) {
-        return Number(
-            socket.uptime
-        )
-    }
+if (socket?.createdAt) {
+    return socket.createdAt
+}
 
-    return Date.now()
+return Date.now()
+
+}
+
+function getSubBots() {
+return [
+...new Set(
+(global.conns || [])
+.filter(
+socket =>
+socket?.isSubBot &&
+socket?.user &&
+socket?.isPairingSocket !== true
+)
+)
+]
+}
+
+function getSubBotByIndex(index) {
+const sockets =
+getSubBots()
+
+if (
+    !Number.isInteger(index) ||
+    index < 1 ||
+    index > sockets.length
+) {
+    return null
+}
+
+return sockets[index - 1]
+
 }
 
 function closeSocket(socket) {
-    try {
-        socket?.ws?.close()
-    } catch {}
+if (!socket) {
+return
+}
 
-    try {
-        socket?.ev?.removeAllListeners()
-    } catch {}
+try {
+    socket.ws?.close()
+} catch {}
 
-    const index =
-        global.conns.indexOf(
-            socket
-        )
+try {
+    socket.ev?.removeAllListeners()
+} catch {}
 
-    if (index !== -1) {
-        global.conns.splice(
-            index,
-            1
-        )
-    }
+const index =
+    (global.conns || []).indexOf(
+        socket
+    )
+
+if (index !== -1) {
+    global.conns.splice(
+        index,
+        1
+    )
+}
+
 }
 
 function deleteSession(number) {
-    const sessionPath =
-        path.join(
-            SUBBOTS_DIR,
-            number
-        )
+const sessionPath =
+path.join(
+SUBBOTS_DIR,
+number
+)
 
-    if (
-        !fs.existsSync(
-            sessionPath
-        )
-    ) {
-        return false
-    }
+if (!fs.existsSync(sessionPath)) {
+    return false
+}
 
+try {
     fs.rmSync(
         sessionPath,
         {
@@ -198,107 +230,95 @@ function deleteSession(number) {
     )
 
     return true
+} catch {
+    return false
+}
+
+}
+
+async function removeSubBotSafely(
+number,
+socket
+) {
+try {
+const module =
+await import(
+'../lib/resetsb.js'
+)
+
+    if (
+        typeof module.removeSubBot ===
+        'function'
+    ) {
+        return await module.removeSubBot(
+            number
+        )
+    }
+} catch {}
+
+closeSocket(socket)
+
+await new Promise(
+    resolve =>
+        setTimeout(
+            resolve,
+            500
+        )
+)
+
+return deleteSession(number)
+
 }
 
 handler.run = async (
-    sock,
-    m,
-    args,
-    extra
+sock,
+m,
+args,
+extra
 ) => {
-    const command =
-        String(
-            extra?.command ||
-            ''
-        ).toLowerCase()
+const command =
+String(
+extra?.command ||
+''
+).toLowerCase()
 
-    // Eliminar sesión
+const listCommands = [
+    'bots',
+    'listjadibots',
+    'subbots'
+]
 
-    if (
-        [
-            'deletesesion',
-            'deletebot',
-            'deletesession',
-            'deletesesaion'
-        ].includes(command)
-    ) {
-        let target =
-            m.key?.participant ||
-            m.sender
+const deleteCommands = [
+    'deletesesion',
+    'deletebot',
+    'deletesession',
+    'deletesesaion'
+]
 
-        if (
-            args[0] &&
-            /^\d+$/.test(
-                args[0]
-            )
-        ) {
-            target =
-                `${args[0]}@s.whatsapp.net`
-        }
+const stopCommands = [
+    'stop',
+    'pausarai',
+    'pausarbot'
+]
 
-        const number =
-            getNumber(target)
+if (
+    listCommands.includes(
+        command
+    )
+) {
+    if (!isMainBot(sock)) {
+        return
+    }
 
-        if (!number) {
-            await sock.sendMessage(
-                m.chat,
-                {
-                    text:
-                        '❌ No se encontró la sesión.'
-                },
-                {
-                    quoted: m
-                }
-            )
+    const sockets =
+        getSubBots()
 
-            return
-        }
-
-        const sockets =
-            [
-                ...global.conns
-            ].filter(
-                socket =>
-                    socket?.isSubBot &&
-                    getNumber(
-                        socket.subBotJid ||
-                        socket.user?.id
-                    ) === number
-            )
-
-        for (
-            const socket of sockets
-        ) {
-            closeSocket(
-                socket
-            )
-        }
-
-        const deleted =
-            deleteSession(
-                number
-            )
-
-        if (!deleted) {
-            await sock.sendMessage(
-                m.chat,
-                {
-                    text:
-                        `❌ No existe una sesión de subbot para +${number}.`
-                },
-                {
-                    quoted: m
-                }
-            )
-
-            return
-        }
-
+    if (sockets.length === 0) {
         await sock.sendMessage(
             m.chat,
             {
                 text:
-                    `🗑️ La sesión del SubBot +${number} fue eliminada.`
+                    '🌐 *SubBots conectados*\n\nNo hay SubBots conectados.'
             },
             {
                 quoted: m
@@ -308,114 +328,9 @@ handler.run = async (
         return
     }
 
-    // Detener subbot
-
-    if (
-        [
-            'stop',
-            'pausarai',
-            'pausarbot'
-        ].includes(command)
-    ) {
-        let target =
-            m.key?.participant ||
-            m.sender
-
-        if (
-            args[0] &&
-            /^\d+$/.test(
-                args[0]
-            )
-        ) {
-            target =
-                `${args[0]}@s.whatsapp.net`
-        }
-
-        const number =
-            getNumber(target)
-
-        const socket =
-            global.conns.find(
-                item =>
-                    item?.isSubBot &&
-                    getNumber(
-                        item.subBotJid ||
-                        item.user?.id
-                    ) === number
-            )
-
-        if (!socket) {
-            await sock.sendMessage(
-                m.chat,
-                {
-                    text:
-                        '❌ No se encontró el SubBot conectado.'
-                },
-                {
-                    quoted: m
-                }
-            )
-
-            return
-        }
-
-        closeSocket(
-            socket
-        )
-
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    `⏸️ SubBot +${number} detenido.`
-            },
-            {
-                quoted: m
-            }
-        )
-
-        return
-    }
-
-    // Lista de subbots
-
-    if (
-        [
-            'bots',
-            'listjadibots',
-            'subbots'
-        ].includes(command)
-    ) {
-        const sockets =
-            [
-                ...new Set(
-                    global.conns.filter(
-                        socket =>
-                            socket?.isSubBot &&
-                            socket?.user
-                    )
-                )
-            ]
-
-        if (
-            sockets.length === 0
-        ) {
-            await sock.sendMessage(
-                m.chat,
-                {
-                    text:
-                        '🌐 *SubBots conectados*\n\nNo hay SubBots conectados.'
-                },
-                {
-                    quoted: m
-                }
-            )
-
-            return
-        }
-
-        const list =
-            sockets.map(
+    const list =
+        sockets
+            .map(
                 (
                     socket,
                     index
@@ -454,27 +369,237 @@ handler.run = async (
                 '\n\n> ───────────────\n\n'
             )
 
-        const response =
-            [
-                '🌐 *SubBots conectados*',
-                '',
-                `🤖 *Total activos:* ${sockets.length}`,
-                '',
-                list,
-                '',
-                '💡 El tiempo se actualiza en cada consulta.'
-            ].join('\n')
+    const response =
+        [
+            '🌐 *SubBots conectados*',
+            '',
+            `🤖 *Total activos:* ${sockets.length}`,
+            '',
+            list,
+            '',
+            '💡 Para detener: .stop 1',
+            '🗑️ Para eliminar: .deletesesion 1'
+        ].join('\n')
 
+    await sock.sendMessage(
+        m.chat,
+        {
+            text: response
+        },
+        {
+            quoted: m
+        }
+    )
+
+    return
+}
+
+if (
+    deleteCommands.includes(
+        command
+    )
+) {
+    if (!isMainBot(sock)) {
+        return
+    }
+
+    if (!isOwner(m, extra)) {
         await sock.sendMessage(
             m.chat,
             {
-                text: response
+                text:
+                    '❌ Solo el owner puede eliminar SubBots.'
             },
             {
                 quoted: m
             }
         )
+
+        return
     }
+
+    const index =
+        Number(
+            args?.[0]
+        )
+
+    if (
+        !Number.isInteger(index) ||
+        index < 1
+    ) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    '❌ Debes indicar el número del SubBot que quieres eliminar.\n\nEjemplo:\n.deletesesion 1\n.deletesesion 2\n\nUsa .bots para ver la lista.'
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    const socket =
+        getSubBotByIndex(index)
+
+    if (!socket) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver los SubBots disponibles.`
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    const number =
+        getNumber(
+            socket.subBotJid ||
+            socket.user?.id
+        )
+
+    if (!number) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    '❌ No pude obtener el número de ese SubBot.'
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    const removed =
+        await removeSubBotSafely(
+            number,
+            socket
+        )
+
+    if (!removed) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    `❌ No se pudo eliminar la sesión del SubBot ${index}.`
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    await sock.sendMessage(
+        m.chat,
+        {
+            text:
+                `🗑️ Sesión del SubBot ${index} (+${number}) eliminada correctamente.`
+        },
+        {
+            quoted: m
+        }
+    )
+
+    return
+}
+
+if (
+    stopCommands.includes(
+        command
+    )
+) {
+    if (!isMainBot(sock)) {
+        return
+    }
+
+    if (!isOwner(m, extra)) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    '❌ Solo el owner puede detener SubBots.'
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    const index =
+        Number(
+            args?.[0]
+        )
+
+    if (
+        !Number.isInteger(index) ||
+        index < 1
+    ) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    '❌ Debes indicar el número del SubBot.\n\nEjemplo:\n.stop 1\n.stop 2\n\nUsa .bots para ver la lista.'
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    const socket =
+        getSubBotByIndex(index)
+
+    if (!socket) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver los SubBots disponibles.`
+            },
+            {
+                quoted: m
+            }
+        )
+
+        return
+    }
+
+    const number =
+        getNumber(
+            socket.subBotJid ||
+            socket.user?.id
+        )
+
+    closeSocket(socket)
+
+    await sock.sendMessage(
+        m.chat,
+        {
+            text:
+                `⏸️ SubBot ${index}${number ? ` (+${number})` : ''} detenido.`
+        },
+        {
+            quoted: m
+        }
+    )
+}
+
 }
 
 export default handler
