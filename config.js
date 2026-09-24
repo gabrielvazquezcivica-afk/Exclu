@@ -10,7 +10,7 @@ const config = {
 
     // IDs / LID de dueños
     ownerLid: [
-        '279302511845418',
+        '110742191763663',
         ''
     ],
 
