@@ -12,11 +12,15 @@ const {
     fetchLatestWaWebVersion
 } = baileys
 
-const SUBBOTS_DIR = path.join(
-    process.cwd(),
-    'sessions',
-    'subbots'
-)
+const SUBBOTS_DIR =
+    path.join(
+        process.cwd(),
+        'sessions',
+        'subbots'
+    )
+
+const pairingInProgress =
+    new Set()
 
 let handler = {}
 
@@ -31,7 +35,10 @@ function normalizePhone(value) {
 
     const phone =
         String(value)
-            .replace(/\D/g, '')
+            .replace(
+                /\D/g,
+                ''
+            )
 
     if (
         phone.length < 8 ||
@@ -128,6 +135,28 @@ function createSocket(
     })
 }
 
+async function closeSocket(
+    socket
+) {
+    if (!socket) {
+        return
+    }
+
+    try {
+        socket.ev?.removeAllListeners?.()
+    } catch {}
+
+    try {
+        socket.ws?.close()
+    } catch {}
+
+    try {
+        socket.end(
+            undefined
+        )
+    } catch {}
+}
+
 handler.run = async (
     conn,
     m,
@@ -181,23 +210,33 @@ handler.run = async (
         return
     }
 
-    console.log(
-        `[CODE] Número solicitado: +${phone}`
-    )
-
     if (
-        !fs.existsSync(
-            SUBBOTS_DIR
+        pairingInProgress.has(
+            phone
         )
     ) {
-        fs.mkdirSync(
-            SUBBOTS_DIR,
+        await conn.sendMessage(
+            m.chat,
             {
-                recursive:
-                    true
+                text:
+                    `⏳ Ya hay una vinculación en proceso para +${phone}.`
+            },
+            {
+                quoted:
+                    m
             }
         )
+
+        return
     }
+
+    pairingInProgress.add(
+        phone
+    )
+
+    let socket = null
+    let handedOff = false
+    let finished = false
 
     const sessionPath =
         path.join(
@@ -211,63 +250,81 @@ handler.run = async (
             'creds.json'
         )
 
-    global.conns =
-        global.conns || []
-
-    const existing =
-        global.conns.find(
-            socket =>
-                socket?.subBotNumber ===
-                phone
-        )
-
-    if (existing) {
-        await conn.sendMessage(
-            m.chat,
-            {
-                text:
-                    `🟢 El número +${phone} ya está conectado como SubBot.`
-            },
-            {
-                quoted:
-                    m
-            }
-        )
-
-        return
-    }
-
-    if (
-        fs.existsSync(
-            credsPath
-        )
-    ) {
-        await conn.sendMessage(
-            m.chat,
-            {
-                text:
-                    `📁 Ya existe una sesión guardada para +${phone}.\n\nSi quieres volver a vincularla, elimina primero:\n\nsessions/subbots/${phone}`
-            },
-            {
-                quoted:
-                    m
-            }
-        )
-
-        return
-    }
-
-    fs.mkdirSync(
-        sessionPath,
-        {
-            recursive:
-                true
-        }
-    )
-
-    let socket = null
-
     try {
+        console.log(
+            `[CODE] Número solicitado: +${phone}`
+        )
+
+        if (
+            !fs.existsSync(
+                SUBBOTS_DIR
+            )
+        ) {
+            fs.mkdirSync(
+                SUBBOTS_DIR,
+                {
+                    recursive:
+                        true
+                }
+            )
+        }
+
+        global.conns =
+            global.conns || []
+
+        const existing =
+            global.conns.find(
+                socket =>
+                    socket?.subBotNumber ===
+                    phone &&
+                    socket?.isPairingSocket ===
+                    true
+            )
+
+        if (existing) {
+            await conn.sendMessage(
+                m.chat,
+                {
+                    text:
+                        `🟡 Ya existe una vinculación en proceso para +${phone}.`
+                },
+                {
+                    quoted:
+                        m
+                }
+            )
+
+            return
+        }
+
+        if (
+            fs.existsSync(
+                credsPath
+            )
+        ) {
+            await conn.sendMessage(
+                m.chat,
+                {
+                    text:
+                        `📁 Ya existe una sesión guardada para +${phone}.\n\nSi quieres volver a vincularla, elimina primero:\n\nsessions/subbots/${phone}`
+                },
+                {
+                    quoted:
+                        m
+                }
+            )
+
+            return
+        }
+
+        fs.mkdirSync(
+            sessionPath,
+            {
+                recursive:
+                    true
+            }
+        )
+
         console.log(
             `[CODE] Preparando sesión para +${phone}...`
         )
@@ -303,6 +360,9 @@ handler.run = async (
         socket.isMainBot =
             false
 
+        socket.isPairingSocket =
+            true
+
         socket.subBotNumber =
             phone
 
@@ -318,11 +378,39 @@ handler.run = async (
 
         socket.ev.on(
             'creds.update',
-            saveCreds
-        )
+            async () => {
+                if (
+                    finished ||
+                    handedOff
+                ) {
+                    return
+                }
 
-        console.log(
-            '[CODE] Socket creado correctamente.'
+                if (
+                    !fs.existsSync(
+                        sessionPath
+                    )
+                ) {
+                    return
+                }
+
+                try {
+                    await saveCreds()
+                } catch (
+                    error
+                ) {
+                    if (
+                        error?.code !==
+                        'ENOENT'
+                    ) {
+                        console.error(
+                            `[CODE] Error guardando credenciales de +${phone}:`,
+                            error?.message ||
+                            error
+                        )
+                    }
+                }
+            }
         )
 
         socket.ev.on(
@@ -352,6 +440,15 @@ handler.run = async (
                     return
                 }
 
+                if (
+                    handedOff
+                ) {
+                    return
+                }
+
+                handedOff =
+                    true
+
                 console.log(
                     `[SUBBOT] +${phone} recibió 515.`
                 )
@@ -370,25 +467,21 @@ handler.run = async (
                     )
                 }
 
-                try {
-                    socket.end(
-                        undefined
-                    )
-                } catch {}
+                await closeSocket(
+                    socket
+                )
 
-                try {
-                    socket.ws?.close()
-                } catch {}
+                socket = null
 
                 console.log(
-                    `[SUBBOT] +${phone} pairing terminado. Entregando sesión a resetsb...`
+                    `[SUBBOT] +${phone} socket de pairing cerrado.`
                 )
 
                 await new Promise(
                     resolve =>
                         setTimeout(
                             resolve,
-                            2000
+                            2500
                         )
                 )
 
@@ -400,17 +493,43 @@ handler.run = async (
                             '../lib/resetsb.js'
                         )
 
-                    await startSubBot(
-                        phone
-                    )
-                } catch (error) {
+                    const result =
+                        await startSubBot(
+                            phone
+                        )
+
+                    if (
+                        result
+                    ) {
+                        console.log(
+                            `[SUBBOT] +${phone} sesión entregada correctamente a resetsb.`
+                        )
+                    } else {
+                        console.error(
+                            `[SUBBOT] No se pudo iniciar la sesión definitiva de +${phone}.`
+                        )
+                    }
+                } catch (
+                    error
+                ) {
                     console.error(
                         `[SUBBOT] Error iniciando sesión definitiva +${phone}:`,
                         error?.message ||
                         error
                     )
+                } finally {
+                    finished =
+                        true
+
+                    pairingInProgress.delete(
+                        phone
+                    )
                 }
             }
+        )
+
+        console.log(
+            '[CODE] Socket creado correctamente.'
         )
 
         await new Promise(
@@ -435,7 +554,9 @@ handler.run = async (
                     await socket.requestPairingCode(
                         phone
                     )
-            } catch (error) {
+            } catch (
+                error
+            ) {
                 console.error(
                     '[CODE] Error solicitando código:',
                     error?.message ||
@@ -469,7 +590,9 @@ handler.run = async (
                 }
             )
         }
-    } catch (error) {
+    } catch (
+        error
+    ) {
         const statusCode =
             getStatusCode(
                 error
@@ -485,7 +608,16 @@ handler.run = async (
             `[SUBBOT] Estado: ${statusCode ?? 'desconocido'}`
         )
 
-        if (socket) {
+        finished =
+            true
+
+        pairingInProgress.delete(
+            phone
+        )
+
+        if (
+            socket
+        ) {
             const index =
                 global.conns.indexOf(
                     socket
@@ -500,15 +632,9 @@ handler.run = async (
                 )
             }
 
-            try {
-                socket.end(
-                    undefined
-                )
-            } catch {}
-
-            try {
-                socket.ws?.close()
-            } catch {}
+            await closeSocket(
+                socket
+            )
         }
 
         try {
