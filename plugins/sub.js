@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import config from '../config.js'
 
 const SUBBOTS_DIR = path.join(
 process.cwd(),
@@ -22,59 +23,55 @@ handler.command = [
 'subbots'
 ]
 
+function limpiar(n) {
+return (n || '')
+.replace(/[^0-9]/g, '')
+}
+
 function getNumber(jid) {
-if (!jid) {
-return ''
+return limpiar(
+String(jid || '')
+.split(':')[0]
+.split('@')[0]
+)
 }
 
-return String(jid)
-    .split(':')[0]
-    .split('@')[0]
-    .replace(/\D/g, '')
-
-}
-
-function isMainBot(sock) {
+function esBotPrincipal(sock) {
 return Boolean(
 sock?.isMainBot === true ||
 sock === global.conn
 )
 }
 
-function isOwner(m, extra) {
-if (extra?.isOwner === true) {
-return true
-}
+function esDueno(m) {
+const remitente =
+m?.key?.participant ||
+m?.key?.remoteJid ||
+''
 
-if (m?.isOwner === true) {
-    return true
-}
+const remNum =
+    limpiar(remitente)
 
-if (m?.senderNumber && global.owner) {
-    const sender =
-        String(m.senderNumber)
-            .replace(/\D/g, '')
+const owners =
+    Array.isArray(config.owner)
+        ? config.owner
+        : []
 
-    const owners = Array.isArray(global.owner)
-        ? global.owner
-        : [global.owner]
+const ownerLids =
+    Array.isArray(config.ownerLid)
+        ? config.ownerLid
+        : []
 
-    return owners.some(owner => {
-        const number =
-            typeof owner === 'object'
-                ? owner?.number ||
-                  owner?.id ||
-                  owner?.jid
-                : owner
-
-        return (
-            getNumber(number) ===
-            sender
-        )
-    })
-}
-
-return false
+return (
+    owners.some(
+        numero =>
+            limpiar(numero) === remNum
+    ) ||
+    ownerLids.some(
+        lid =>
+            limpiar(lid) === remNum
+    )
+)
 
 }
 
@@ -86,10 +83,21 @@ return '🔴 Desconectado'
 const state =
     socket.ws.socket.readyState
 
-if (state === 0) return '🟡 Conectando'
-if (state === 1) return '🟢 Activo'
-if (state === 2) return '🟠 Cerrando'
-if (state === 3) return '🔴 Cerrado'
+if (state === 0) {
+    return '🟡 Conectando'
+}
+
+if (state === 1) {
+    return '🟢 Activo'
+}
+
+if (state === 2) {
+    return '🟠 Cerrando'
+}
+
+if (state === 3) {
+    return '🔴 Cerrado'
+}
 
 return '⚪ Desconocido'
 
@@ -108,16 +116,24 @@ if (elapsed < 0) {
 }
 
 const seconds =
-    Math.floor(elapsed / 1000)
+    Math.floor(
+        elapsed / 1000
+    )
 
 const minutes =
-    Math.floor(seconds / 60)
+    Math.floor(
+        seconds / 60
+    )
 
 const hours =
-    Math.floor(minutes / 60)
+    Math.floor(
+        minutes / 60
+    )
 
 const days =
-    Math.floor(hours / 24)
+    Math.floor(
+        hours / 24
+    )
 
 if (days > 0) {
     return `${days} día(s), ${hours % 24} hora(s)`
@@ -270,6 +286,22 @@ return deleteSession(number)
 
 }
 
+async function enviarNoOwner(
+sock,
+m,
+texto
+) {
+await sock.sendMessage(
+m.chat,
+{
+text: texto
+},
+{
+quoted: m
+}
+)
+}
+
 handler.run = async (
 sock,
 m,
@@ -306,7 +338,7 @@ if (
         command
     )
 ) {
-    if (!isMainBot(sock)) {
+    if (!esBotPrincipal(sock)) {
         return
     }
 
@@ -314,15 +346,10 @@ if (
         getSubBots()
 
     if (sockets.length === 0) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    '🌐 *SubBots conectados*\n\nNo hay SubBots conectados.'
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            '🌐 *SubBots conectados*\n\nNo hay SubBots conectados.'
         )
 
         return
@@ -399,20 +426,15 @@ if (
         command
     )
 ) {
-    if (!isMainBot(sock)) {
+    if (!esBotPrincipal(sock)) {
         return
     }
 
-    if (!isOwner(m, extra)) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    '❌ Solo el owner puede eliminar SubBots.'
-            },
-            {
-                quoted: m
-            }
+    if (!esDueno(m)) {
+        await enviarNoOwner(
+            sock,
+            m,
+            '🚫 Solo el owner principal puede eliminar SubBots.'
         )
 
         return
@@ -427,15 +449,10 @@ if (
         !Number.isInteger(index) ||
         index < 1
     ) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    '❌ Debes indicar el número del SubBot que quieres eliminar.\n\nEjemplo:\n.deletesesion 1\n.deletesesion 2\n\nUsa .bots para ver la lista.'
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            '❌ Debes indicar el número del SubBot que quieres eliminar.\n\nEjemplo:\n.deletesesion 1\n.deletesesion 2\n\nUsa .bots para ver la lista.'
         )
 
         return
@@ -445,15 +462,10 @@ if (
         getSubBotByIndex(index)
 
     if (!socket) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver los SubBots disponibles.`
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver los SubBots disponibles.`
         )
 
         return
@@ -466,15 +478,10 @@ if (
         )
 
     if (!number) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    '❌ No pude obtener el número de ese SubBot.'
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            '❌ No pude obtener el número de ese SubBot.'
         )
 
         return
@@ -487,29 +494,19 @@ if (
         )
 
     if (!removed) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    `❌ No se pudo eliminar la sesión del SubBot ${index}.`
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            `❌ No se pudo eliminar la sesión del SubBot ${index}.`
         )
 
         return
     }
 
-    await sock.sendMessage(
-        m.chat,
-        {
-            text:
-                `🗑️ Sesión del SubBot ${index} (+${number}) eliminada correctamente.`
-        },
-        {
-            quoted: m
-        }
+    await enviarNoOwner(
+        sock,
+        m,
+        `🗑️ Sesión del SubBot ${index} (+${number}) eliminada correctamente.`
     )
 
     return
@@ -520,20 +517,15 @@ if (
         command
     )
 ) {
-    if (!isMainBot(sock)) {
+    if (!esBotPrincipal(sock)) {
         return
     }
 
-    if (!isOwner(m, extra)) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    '❌ Solo el owner puede detener SubBots.'
-            },
-            {
-                quoted: m
-            }
+    if (!esDueno(m)) {
+        await enviarNoOwner(
+            sock,
+            m,
+            '🚫 Solo el owner principal puede detener SubBots.'
         )
 
         return
@@ -548,15 +540,10 @@ if (
         !Number.isInteger(index) ||
         index < 1
     ) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    '❌ Debes indicar el número del SubBot.\n\nEjemplo:\n.stop 1\n.stop 2\n\nUsa .bots para ver la lista.'
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            '❌ Debes indicar el número del SubBot.\n\nEjemplo:\n.stop 1\n.stop 2\n\nUsa .bots para ver la lista.'
         )
 
         return
@@ -566,15 +553,10 @@ if (
         getSubBotByIndex(index)
 
     if (!socket) {
-        await sock.sendMessage(
-            m.chat,
-            {
-                text:
-                    `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver los SubBots disponibles.`
-            },
-            {
-                quoted: m
-            }
+        await enviarNoOwner(
+            sock,
+            m,
+            `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver la lista.`
         )
 
         return
@@ -588,15 +570,10 @@ if (
 
     closeSocket(socket)
 
-    await sock.sendMessage(
-        m.chat,
-        {
-            text:
-                `⏸️ SubBot ${index}${number ? ` (+${number})` : ''} detenido.`
-        },
-        {
-            quoted: m
-        }
+    await enviarNoOwner(
+        sock,
+        m,
+        `⏸️ SubBot ${index}${number ? ` (+${number})` : ''} detenido.`
     )
 }
 
