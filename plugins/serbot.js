@@ -19,59 +19,108 @@ const SUBBOTS_DIR = path.join(
 const PAIRING_IMAGE =
     'https://files.catbox.moe/n80w1o.jpg'
 
-function getPhoneFromMessage(m) {
+function getLid(m) {
 
-    const candidates = [
-        m?.key?.participantAlt,
-        m?.participantAlt,
-        m?.key?.senderPn,
-        m?.senderPn,
-        m?.key?.participant,
+    const jid =
+        m?.key?.participant ||
+        m?.participant ||
         m?.sender
-    ]
 
-    for (
-        const value of candidates
+    if (
+        typeof jid !== 'string'
     ) {
+        return null
+    }
 
-        if (!value) continue
+    if (
+        !jid.endsWith('@lid')
+    ) {
+        return null
+    }
 
-        const raw =
-            String(value)
+    return jid
+}
 
-        const number =
-            raw
-                .split('@')[0]
-                .split(':')[0]
-                .replace(/\D/g, '')
+async function getPhoneFromLid(
+    conn,
+    m
+) {
+
+    const lid =
+        getLid(m)
+
+    if (!lid) {
+        return null
+    }
+
+    try {
+
+        const mapping =
+            conn?.signalRepository
+                ?.lidMapping
 
         if (
-            number.length >= 8 &&
-            number.length <= 15
+            mapping &&
+            typeof mapping.getPNForLID ===
+            'function'
         ) {
-            return number
+
+            const pn =
+                await mapping.getPNForLID(
+                    lid
+                )
+
+            if (
+                pn &&
+                typeof pn === 'string' &&
+                pn.endsWith(
+                    '@s.whatsapp.net'
+                )
+            ) {
+
+                return pn
+            }
         }
+
+    } catch (
+        error
+    ) {
+
+        console.log(
+            `[CODE] Error resolviendo LID: ${error?.message || error}`
+        )
     }
 
     return null
 }
 
-function normalizePhone(phone) {
-
-    if (!phone) return null
-
-    const number =
-        String(phone)
-            .replace(/\D/g, '')
+function normalizePhone(
+    jid
+) {
 
     if (
-        number.length < 8 ||
-        number.length > 15
+        !jid
     ) {
         return null
     }
 
-    return number
+    const phone =
+        String(jid)
+            .split('@')[0]
+            .split(':')[0]
+            .replace(
+                /\D/g,
+                ''
+            )
+
+    if (
+        phone.length < 8 ||
+        phone.length > 15
+    ) {
+        return null
+    }
+
+    return phone
 }
 
 let handler = {}
@@ -95,19 +144,45 @@ handler.run = async (
         return
     }
 
-    // Obtener automáticamente el número del usuario.
+    let phoneJid = null
 
-console.log('[CODE] key:', m?.key)
-console.log('[CODE] sender:', m?.sender)
-console.log('[CODE] participant:', m?.participant)
-console.log('[CODE] participantAlt:', m?.key?.participantAlt)
-console.log('[CODE] senderPn:', m?.key?.senderPn)
+    // Si el mensaje trae un PN directamente,
+    // utilizarlo.
 
-    let phone =
-        getPhoneFromMessage(m)
+    const directSender =
+        m?.key?.participant ||
+        m?.participant ||
+        m?.sender
 
-    phone =
-        normalizePhone(phone)
+    if (
+        typeof directSender === 'string' &&
+        directSender.endsWith(
+            '@s.whatsapp.net'
+        )
+    ) {
+
+        phoneJid =
+            directSender
+    }
+
+    // Si viene como LID, resolverlo mediante
+    // el mapeo interno de Baileys.
+
+    if (
+        !phoneJid
+    ) {
+
+        phoneJid =
+            await getPhoneFromLid(
+                conn,
+                m
+            )
+    }
+
+    const phone =
+        normalizePhone(
+            phoneJid
+        )
 
     if (!phone) {
 
@@ -115,7 +190,7 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
             m.chat,
             {
                 text:
-                    '❌ No se pudo obtener tu número de WhatsApp.'
+                    '❌ No pude obtener el número telefónico asociado a tu cuenta de WhatsApp.\n\nWhatsApp está enviando únicamente tu identificador LID y Baileys todavía no tiene disponible su número telefónico.'
             },
             {
                 quoted: m
@@ -124,6 +199,10 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
 
         return
     }
+
+    console.log(
+        `[CODE] Número resuelto: +${phone}`
+    )
 
     if (
         !fs.existsSync(
@@ -163,15 +242,15 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
                     return false
                 }
 
+                const jid =
+                    socket.subBotJid ||
+                    socket.user?.id ||
+                    ''
+
                 const number =
-                    String(
-                        socket.subBotJid ||
-                        socket.user?.id ||
-                        ''
+                    normalizePhone(
+                        jid
                     )
-                        .split('@')[0]
-                        .split(':')[0]
-                        .replace(/\D/g, '')
 
                 return (
                     number === phone
@@ -179,7 +258,9 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
             }
         )
 
-    if (connected) {
+    if (
+        connected
+    ) {
 
         await conn.sendMessage(
             m.chat,
@@ -318,7 +399,7 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
             )
         }
 
-        // Esperar antes de solicitar el código.
+        // Esperar a que Baileys prepare la conexión.
 
         await new Promise(
             resolve =>
@@ -360,8 +441,6 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
                     quoted: m
                 }
             )
-
-            // El código solamente se envía al chat.
 
             await conn.sendMessage(
                 m.chat,
@@ -475,7 +554,9 @@ console.log('[CODE] senderPn:', m?.key?.senderPn)
             }
         )
 
-    } catch (error) {
+    } catch (
+        error
+    ) {
 
         console.error(
             `[SUBBOT] Error iniciando +${phone}:`,
