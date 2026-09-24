@@ -19,99 +19,28 @@ const SUBBOTS_DIR = path.join(
 const PAIRING_IMAGE =
     'https://files.catbox.moe/n80w1o.jpg'
 
-function getLid(m) {
+let handler = {}
 
-    const jid =
-        m?.key?.participant ||
-        m?.participant ||
-        m?.sender
+handler.command = [
+    'code'
+]
 
-    if (
-        typeof jid !== 'string'
-    ) {
-        return null
-    }
+function normalizePhone(value) {
+    if (!value) return null
+
+    const text = String(value).trim()
 
     if (
-        !jid.endsWith('@lid')
-    ) {
-        return null
-    }
-
-    return jid
-}
-
-async function getPhoneFromLid(
-    conn,
-    m
-) {
-
-    const lid =
-        getLid(m)
-
-    if (!lid) {
-        return null
-    }
-
-    try {
-
-        const mapping =
-            conn?.signalRepository
-                ?.lidMapping
-
-        if (
-            mapping &&
-            typeof mapping.getPNForLID ===
-            'function'
-        ) {
-
-            const pn =
-                await mapping.getPNForLID(
-                    lid
-                )
-
-            if (
-                pn &&
-                typeof pn === 'string' &&
-                pn.endsWith(
-                    '@s.whatsapp.net'
-                )
-            ) {
-
-                return pn
-            }
-        }
-
-    } catch (
-        error
-    ) {
-
-        console.log(
-            `[CODE] Error resolviendo LID: ${error?.message || error}`
-        )
-    }
-
-    return null
-}
-
-function normalizePhone(
-    jid
-) {
-
-    if (
-        !jid
+        text.endsWith('@lid')
     ) {
         return null
     }
 
     const phone =
-        String(jid)
+        text
             .split('@')[0]
             .split(':')[0]
-            .replace(
-                /\D/g,
-                ''
-            )
+            .replace(/\D/g, '')
 
     if (
         phone.length < 8 ||
@@ -123,19 +52,228 @@ function normalizePhone(
     return phone
 }
 
-let handler = {}
+function getValue(object, keys) {
+    if (!object) return null
 
-handler.command = [
-    'code'
-]
+    for (const key of keys) {
+        const value = object?.[key]
+
+        if (
+            typeof value === 'string' &&
+            value.trim()
+        ) {
+            return value
+        }
+    }
+
+    return null
+}
+
+async function getPhoneFromLid(
+    conn,
+    m
+) {
+    const key =
+        m?.key || {}
+
+    const lid =
+        key.participant?.endsWith('@lid')
+            ? key.participant
+            : m?.sender?.endsWith('@lid')
+                ? m.sender
+                : null
+
+    if (!lid) {
+        return null
+    }
+
+    console.log(
+        `[CODE] Intentando resolver LID: ${lid}`
+    )
+
+    const directValues = [
+        key.participantAlt,
+        key.senderPn,
+        m?.participantAlt,
+        m?.senderPn,
+        m?.senderPn?.jid,
+        m?.senderPn?.user
+    ]
+
+    for (
+        const value of directValues
+    ) {
+        const phone =
+            normalizePhone(value)
+
+        if (phone) {
+            console.log(
+                `[CODE] Número encontrado directamente: +${phone}`
+            )
+
+            return phone
+        }
+    }
+
+    try {
+        const mapping =
+            conn
+                ?.signalRepository
+                ?.lidMapping
+
+        if (
+            mapping &&
+            typeof mapping.getPNForLID ===
+            'function'
+        ) {
+            const result =
+                await mapping.getPNForLID(
+                    lid
+                )
+
+            const phone =
+                normalizePhone(result)
+
+            if (phone) {
+                console.log(
+                    `[CODE] Número encontrado mediante lidMapping: +${phone}`
+                )
+
+                return phone
+            }
+        }
+    } catch (error) {
+        console.log(
+            `[CODE] lidMapping no disponible: ${error?.message || error}`
+        )
+    }
+
+    try {
+        if (
+            typeof conn?.groupMetadata ===
+            'function' &&
+            m?.chat?.endsWith('@g.us')
+        ) {
+            const metadata =
+                await conn.groupMetadata(
+                    m.chat
+                )
+
+            const participants =
+                metadata?.participants ||
+                []
+
+            const participant =
+                participants.find(
+                    item => {
+                        const ids = [
+                            item?.id,
+                            item?.jid,
+                            item?.lid,
+                            item?.participant,
+                            item?.phoneNumber,
+                            item?.phone
+                        ]
+
+                        return ids.some(
+                            id =>
+                                String(id) ===
+                                String(lid)
+                        )
+                    }
+                )
+
+            if (participant) {
+                const possibleValues = [
+                    participant?.phoneNumber,
+                    participant?.phone,
+                    participant?.jid,
+                    participant?.id
+                ]
+
+                for (
+                    const value of possibleValues
+                ) {
+                    const phone =
+                        normalizePhone(
+                            value
+                        )
+
+                    if (phone) {
+                        console.log(
+                            `[CODE] Número encontrado en metadatos del grupo: +${phone}`
+                        )
+
+                        return phone
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.log(
+            `[CODE] No se pudieron consultar los metadatos del grupo: ${error?.message || error}`
+        )
+    }
+
+    try {
+        const mapping =
+            conn
+                ?.signalRepository
+                ?.lidMapping
+
+        if (
+            mapping &&
+            typeof mapping.getPNForLID ===
+            'function'
+        ) {
+            const result =
+                await mapping.getPNForLID(
+                    lid
+                )
+
+            if (
+                result &&
+                typeof result === 'object'
+            ) {
+                const values = [
+                    result?.jid,
+                    result?.id,
+                    result?.user,
+                    result?.phone,
+                    result?.phoneNumber
+                ]
+
+                for (
+                    const value of values
+                ) {
+                    const phone =
+                        normalizePhone(
+                            value
+                        )
+
+                    if (phone) {
+                        console.log(
+                            `[CODE] Número encontrado en resultado del mapeo: +${phone}`
+                        )
+
+                        return phone
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.log(
+            `[CODE] Error en búsqueda secundaria LID: ${error?.message || error}`
+        )
+    }
+
+    return null
+}
 
 handler.run = async (
     conn,
     m
 ) => {
-
-    // Solo el bot principal puede generar códigos.
-
     const isMainBot =
         conn?.isMainBot === true ||
         conn === global.conn
@@ -144,53 +282,44 @@ handler.run = async (
         return
     }
 
-    let phoneJid = null
+    let phone = null
 
-    // Si el mensaje trae un PN directamente,
-    // utilizarlo.
-
-    const directSender =
-        m?.key?.participant ||
-        m?.participant ||
+    const directCandidates = [
+        m?.key?.participantAlt,
+        m?.key?.senderPn,
+        m?.participantAlt,
+        m?.senderPn,
+        m?.senderPn?.jid,
+        m?.senderPn?.user,
         m?.sender
+    ]
 
-    if (
-        typeof directSender === 'string' &&
-        directSender.endsWith(
-            '@s.whatsapp.net'
-        )
+    for (
+        const value of directCandidates
     ) {
+        const result =
+            normalizePhone(value)
 
-        phoneJid =
-            directSender
+        if (result) {
+            phone = result
+            break
+        }
     }
 
-    // Si viene como LID, resolverlo mediante
-    // el mapeo interno de Baileys.
-
-    if (
-        !phoneJid
-    ) {
-
-        phoneJid =
+    if (!phone) {
+        phone =
             await getPhoneFromLid(
                 conn,
                 m
             )
     }
 
-    const phone =
-        normalizePhone(
-            phoneJid
-        )
-
     if (!phone) {
-
         await conn.sendMessage(
             m.chat,
             {
                 text:
-                    '❌ No pude obtener el número telefónico asociado a tu cuenta de WhatsApp.\n\nWhatsApp está enviando únicamente tu identificador LID y Baileys todavía no tiene disponible su número telefónico.'
+                    '❌ No pude obtener el número telefónico asociado a tu cuenta de WhatsApp.\n\nWhatsApp está enviando únicamente tu identificador LID y Baileys todavía no pudo resolverlo a un número telefónico.'
             },
             {
                 quoted: m
@@ -201,15 +330,12 @@ handler.run = async (
     }
 
     console.log(
-        `[CODE] Número resuelto: +${phone}`
+        `[CODE] Número final para vincular: +${phone}`
     )
 
-    if (
-        !fs.existsSync(
-            SUBBOTS_DIR
-        )
-    ) {
-
+    if (!fs.existsSync(
+        SUBBOTS_DIR
+    )) {
         fs.mkdirSync(
             SUBBOTS_DIR,
             {
@@ -230,38 +356,27 @@ handler.run = async (
             'creds.json'
         )
 
-    // Comprobar si ya existe un SubBot conectado.
-
     const connected =
         global.conns?.find(
             socket => {
-
                 if (
                     !socket?.isSubBot
                 ) {
                     return false
                 }
 
-                const jid =
-                    socket.subBotJid ||
-                    socket.user?.id ||
-                    ''
-
                 const number =
                     normalizePhone(
-                        jid
+                        socket.subBotJid ||
+                        socket.user?.id ||
+                        socket.subBotNumber
                     )
 
-                return (
-                    number === phone
-                )
+                return number === phone
             }
         )
 
-    if (
-        connected
-    ) {
-
+    if (connected) {
         await conn.sendMessage(
             m.chat,
             {
@@ -276,14 +391,11 @@ handler.run = async (
         return
     }
 
-    // Comprobar si ya existe una sesión guardada.
-
     if (
         fs.existsSync(
             credsPath
         )
     ) {
-
         await conn.sendMessage(
             m.chat,
             {
@@ -308,7 +420,6 @@ handler.run = async (
     let socket = null
 
     try {
-
         const {
             state,
             saveCreds
@@ -362,17 +473,15 @@ handler.run = async (
                     true
             })
 
-        socket.isSubBot =
-            true
-
-        socket.isMainBot =
-            false
-
-        socket.isInit =
-            false
+        socket.isSubBot = true
+        socket.isMainBot = false
+        socket.isInit = false
 
         socket.subBotJid =
             `${phone}@s.whatsapp.net`
+
+        socket.subBotNumber =
+            phone
 
         socket.sessionPath =
             sessionPath
@@ -393,26 +502,22 @@ handler.run = async (
                 socket
             )
         ) {
-
             global.conns.push(
                 socket
             )
         }
 
-        // Esperar a que Baileys prepare la conexión.
-
         await new Promise(
             resolve =>
                 setTimeout(
                     resolve,
-                    3000
+                    1500
                 )
         )
 
         if (
             !state.creds.registered
         ) {
-
             let code =
                 await socket.requestPairingCode(
                     phone
@@ -433,7 +538,6 @@ handler.run = async (
                         url:
                             PAIRING_IMAGE
                     },
-
                     caption:
                         `🔐 *Código de vinculación*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*`
                 },
@@ -457,7 +561,6 @@ handler.run = async (
         socket.ev.on(
             'connection.update',
             async update => {
-
                 const {
                     connection,
                     lastDisconnect
@@ -467,7 +570,6 @@ handler.run = async (
                     connection ===
                     'open'
                 ) {
-
                     socket.isInit =
                         true
 
@@ -507,7 +609,6 @@ handler.run = async (
                 if (
                     index !== -1
                 ) {
-
                     global.conns.splice(
                         index,
                         1
@@ -519,16 +620,11 @@ handler.run = async (
                         DisconnectReason.loggedOut ||
                     statusCode ===
                         DisconnectReason.badSession ||
-                    statusCode ===
-                        401 ||
-                    statusCode ===
-                        403 ||
-                    statusCode ===
-                        405
+                    statusCode === 401 ||
+                    statusCode === 403 ||
+                    statusCode === 405
                 ) {
-
                     try {
-
                         fs.rmSync(
                             sessionPath,
                             {
@@ -538,7 +634,6 @@ handler.run = async (
                                     true
                             }
                         )
-
                     } catch {}
 
                     console.log(
@@ -553,21 +648,14 @@ handler.run = async (
                 )
             }
         )
-
-    } catch (
-        error
-    ) {
-
+    } catch (error) {
         console.error(
             `[SUBBOT] Error iniciando +${phone}:`,
             error?.message ||
             error
         )
 
-        if (
-            socket
-        ) {
-
+        if (socket) {
             const index =
                 global.conns.indexOf(
                     socket
@@ -576,7 +664,6 @@ handler.run = async (
             if (
                 index !== -1
             ) {
-
                 global.conns.splice(
                     index,
                     1
@@ -589,28 +676,18 @@ handler.run = async (
         }
 
         try {
-
-            if (
-                !fs.existsSync(
-                    credsPath
-                )
-            ) {
-
-                fs.rmSync(
-                    sessionPath,
-                    {
-                        recursive:
-                            true,
-                        force:
-                            true
-                    }
-                )
-            }
-
+            fs.rmSync(
+                sessionPath,
+                {
+                    recursive:
+                        true,
+                    force:
+                        true
+                }
+            )
         } catch {}
 
         try {
-
             await conn.sendMessage(
                 m.chat,
                 {
@@ -621,7 +698,6 @@ handler.run = async (
                     quoted: m
                 }
             )
-
         } catch {}
     }
 }
