@@ -26,9 +26,28 @@ handler.command = [
 ]
 
 function normalizePhone(value) {
-    if (!value) return null
+    if (!value) {
+        return null
+    }
 
-    const text = String(value).trim()
+    if (
+        typeof value === 'object'
+    ) {
+        value =
+            value.jid ||
+            value.id ||
+            value.phoneNumber ||
+            value.phone ||
+            value.user ||
+            value.pn
+    }
+
+    if (!value) {
+        return null
+    }
+
+    const text =
+        String(value).trim()
 
     if (
         text.endsWith('@lid')
@@ -52,36 +71,80 @@ function normalizePhone(value) {
     return phone
 }
 
-function getValue(object, keys) {
-    if (!object) return null
+function normalizeJid(value) {
+    if (!value) {
+        return null
+    }
 
-    for (const key of keys) {
-        const value = object?.[key]
+    if (
+        typeof value === 'object'
+    ) {
+        value =
+            value.jid ||
+            value.id ||
+            value.lid ||
+            value.pn ||
+            value.phoneNumber ||
+            value.phone
+    }
+
+    if (!value) {
+        return null
+    }
+
+    return String(value).trim()
+}
+
+function getLid(m) {
+    const candidates = [
+        m?.key?.participant,
+        m?.key?.senderPn,
+        m?.key?.participantPn,
+        m?.key?.remoteJid,
+        m?.participant,
+        m?.sender
+    ]
+
+    for (
+        const value of candidates
+    ) {
+        const jid =
+            normalizeJid(value)
 
         if (
-            typeof value === 'string' &&
-            value.trim()
+            jid?.endsWith('@lid')
         ) {
-            return value
+            return jid
         }
     }
 
     return null
 }
 
+function getDirectPhoneCandidates(m) {
+    return [
+        m?.key?.participantAlt,
+        m?.key?.remoteJidAlt,
+        m?.key?.senderPn,
+        m?.key?.participantPn,
+        m?.key?.participantPhone,
+        m?.key?.senderPhone,
+        m?.participantAlt,
+        m?.participantPn,
+        m?.senderPn,
+        m?.senderPn?.jid,
+        m?.senderPn?.user,
+        m?.senderPhone,
+        m?.participantPhone
+    ]
+}
+
 async function getPhoneFromLid(
     conn,
     m
 ) {
-    const key =
-        m?.key || {}
-
     const lid =
-        key.participant?.endsWith('@lid')
-            ? key.participant
-            : m?.sender?.endsWith('@lid')
-                ? m.sender
-                : null
+        getLid(m)
 
     if (!lid) {
         return null
@@ -91,17 +154,11 @@ async function getPhoneFromLid(
         `[CODE] Intentando resolver LID: ${lid}`
     )
 
-    const directValues = [
-        key.participantAlt,
-        key.senderPn,
-        m?.participantAlt,
-        m?.senderPn,
-        m?.senderPn?.jid,
-        m?.senderPn?.user
-    ]
+    const directCandidates =
+        getDirectPhoneCandidates(m)
 
     for (
-        const value of directValues
+        const value of directCandidates
     ) {
         const phone =
             normalizePhone(value)
@@ -144,16 +201,18 @@ async function getPhoneFromLid(
         }
     } catch (error) {
         console.log(
-            `[CODE] lidMapping no disponible: ${error?.message || error}`
+            `[CODE] Error en lidMapping: ${error?.message || error}`
         )
     }
 
-    try {
-        if (
-            typeof conn?.groupMetadata ===
-            'function' &&
-            m?.chat?.endsWith('@g.us')
-        ) {
+    if (
+        m?.chat?.endsWith('@g.us')
+    ) {
+        try {
+            console.log(
+                `[CODE] Buscando LID en metadatos del grupo: ${m.chat}`
+            )
+
             const metadata =
                 await conn.groupMetadata(
                     m.chat
@@ -163,41 +222,52 @@ async function getPhoneFromLid(
                 metadata?.participants ||
                 []
 
-            const participant =
-                participants.find(
-                    item => {
-                        const ids = [
-                            item?.id,
-                            item?.jid,
-                            item?.lid,
-                            item?.participant,
-                            item?.phoneNumber,
-                            item?.phone
-                        ]
+            for (
+                const participant of participants
+            ) {
+                const ids = [
+                    participant?.id,
+                    participant?.jid,
+                    participant?.lid,
+                    participant?.participant,
+                    participant?.participantPn,
+                    participant?.phoneNumber,
+                    participant?.phone
+                ]
 
-                        return ids.some(
-                            id =>
-                                String(id) ===
-                                String(lid)
-                        )
-                    }
-                )
+                const matches =
+                    ids.some(
+                        value => {
+                            const jid =
+                                normalizeJid(
+                                    value
+                                )
 
-            if (participant) {
-                const possibleValues = [
+                            return (
+                                jid === lid ||
+                                jid?.split('@')[0] ===
+                                    lid.split('@')[0]
+                            )
+                        }
+                    )
+
+                if (!matches) {
+                    continue
+                }
+
+                const phoneCandidates = [
                     participant?.phoneNumber,
                     participant?.phone,
+                    participant?.participantPn,
                     participant?.jid,
                     participant?.id
                 ]
 
                 for (
-                    const value of possibleValues
+                    const value of phoneCandidates
                 ) {
                     const phone =
-                        normalizePhone(
-                            value
-                        )
+                        normalizePhone(value)
 
                     if (phone) {
                         console.log(
@@ -208,11 +278,11 @@ async function getPhoneFromLid(
                     }
                 }
             }
+        } catch (error) {
+            console.log(
+                `[CODE] Error consultando grupo: ${error?.message || error}`
+            )
         }
-    } catch (error) {
-        console.log(
-            `[CODE] No se pudieron consultar los metadatos del grupo: ${error?.message || error}`
-        )
     }
 
     try {
@@ -223,49 +293,14 @@ async function getPhoneFromLid(
 
         if (
             mapping &&
-            typeof mapping.getPNForLID ===
+            typeof mapping.getLIDForPN ===
             'function'
         ) {
-            const result =
-                await mapping.getPNForLID(
-                    lid
-                )
-
-            if (
-                result &&
-                typeof result === 'object'
-            ) {
-                const values = [
-                    result?.jid,
-                    result?.id,
-                    result?.user,
-                    result?.phone,
-                    result?.phoneNumber
-                ]
-
-                for (
-                    const value of values
-                ) {
-                    const phone =
-                        normalizePhone(
-                            value
-                        )
-
-                    if (phone) {
-                        console.log(
-                            `[CODE] Número encontrado en resultado del mapeo: +${phone}`
-                        )
-
-                        return phone
-                    }
-                }
-            }
+            console.log(
+                '[CODE] El mapeo LID todavía no existe. Se revisarán los mapeos disponibles.'
+            )
         }
-    } catch (error) {
-        console.log(
-            `[CODE] Error en búsqueda secundaria LID: ${error?.message || error}`
-        )
-    }
+    } catch {}
 
     return null
 }
@@ -286,12 +321,16 @@ handler.run = async (
 
     const directCandidates = [
         m?.key?.participantAlt,
+        m?.key?.remoteJidAlt,
         m?.key?.senderPn,
+        m?.key?.participantPn,
+        m?.key?.participantPhone,
+        m?.key?.senderPhone,
         m?.participantAlt,
+        m?.participantPn,
         m?.senderPn,
         m?.senderPn?.jid,
-        m?.senderPn?.user,
-        m?.sender
+        m?.senderPn?.user
     ]
 
     for (
@@ -319,7 +358,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    '❌ No pude obtener el número telefónico asociado a tu cuenta de WhatsApp.\n\nWhatsApp está enviando únicamente tu identificador LID y Baileys todavía no pudo resolverlo a un número telefónico.'
+                    '❌ No pude obtener el número telefónico asociado a tu cuenta de WhatsApp.\n\nWhatsApp solamente proporcionó el identificador LID y Baileys todavía no tiene un mapeo LID → número para este usuario.'
             },
             {
                 quoted: m
@@ -333,9 +372,11 @@ handler.run = async (
         `[CODE] Número final para vincular: +${phone}`
     )
 
-    if (!fs.existsSync(
-        SUBBOTS_DIR
-    )) {
+    if (
+        !fs.existsSync(
+            SUBBOTS_DIR
+        )
+    ) {
         fs.mkdirSync(
             SUBBOTS_DIR,
             {
@@ -473,9 +514,14 @@ handler.run = async (
                     true
             })
 
-        socket.isSubBot = true
-        socket.isMainBot = false
-        socket.isInit = false
+        socket.isSubBot =
+            true
+
+        socket.isMainBot =
+            false
+
+        socket.isInit =
+            false
 
         socket.subBotJid =
             `${phone}@s.whatsapp.net`
@@ -492,6 +538,32 @@ handler.run = async (
         socket.ev.on(
             'creds.update',
             saveCreds
+        )
+
+        socket.ev.on(
+            'lid-mapping.update',
+            update => {
+                try {
+                    if (!update) {
+                        return
+                    }
+
+                    const lid =
+                        update.lid
+
+                    const pn =
+                        update.pn
+
+                    if (
+                        lid &&
+                        pn
+                    ) {
+                        console.log(
+                            `[LID] Mapeo recibido: ${lid} -> ${pn}`
+                        )
+                    }
+                } catch {}
+            }
         )
 
         global.conns =
