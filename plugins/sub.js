@@ -1,12 +1,4 @@
-import fs from 'fs'
-import path from 'path'
 import config from '../config.js'
-
-const SUBBOTS_DIR = path.join(
-process.cwd(),
-'sessions',
-'subbots'
-)
 
 let handler = {}
 
@@ -76,8 +68,16 @@ return (
 }
 
 function getState(socket) {
-if (!socket?.ws?.socket) {
+if (!socket) {
 return '🔴 Desconectado'
+}
+
+if (socket.isInit === true) {
+    return '🟢 Activo'
+}
+
+if (!socket.ws?.socket) {
+    return '🔴 Desconectado'
 }
 
 const state =
@@ -152,39 +152,55 @@ return `${seconds} segundo(s)`
 }
 
 function getStartTime(socket) {
-if (socket?.startTime) {
-return socket.startTime
-}
-
-if (socket?.connectedAt) {
-    return socket.connectedAt
-}
-
-if (socket?.createdAt) {
-    return socket.createdAt
-}
-
-return Date.now()
-
-}
-
-function getSubBots() {
-return [
-...new Set(
-(global.conns || [])
-.filter(
-socket =>
-socket?.isSubBot &&
-socket?.user &&
-socket?.isPairingSocket !== true
+return (
+socket?.startTime ||
+socket?.connectedAt ||
+socket?.createdAt ||
+Date.now()
 )
-)
-]
 }
 
-function getSubBotByIndex(index) {
+async function getSubBots() {
+try {
+const module =
+await import(
+'../lib/resetsb.js'
+)
+
+    if (
+        typeof module.getActiveSubBots !==
+        'function'
+    ) {
+        return []
+    }
+
+    const bots =
+        module.getActiveSubBots()
+
+    return bots
+        .map(
+            bot =>
+                bot?.sock
+        )
+        .filter(
+            socket =>
+                socket?.isSubBot === true
+        )
+} catch (error) {
+    console.error(
+        '[SUB] Error obteniendo SubBots:',
+        error?.message ||
+        error
+    )
+
+    return []
+}
+
+}
+
+async function getSubBotByIndex(index) {
 const sockets =
-getSubBots()
+await getSubBots()
 
 if (
     !Number.isInteger(index) ||
@@ -198,103 +214,15 @@ return sockets[index - 1]
 
 }
 
-function closeSocket(socket) {
-if (!socket) {
-return
-}
-
-try {
-    socket.ws?.close()
-} catch {}
-
-try {
-    socket.ev?.removeAllListeners()
-} catch {}
-
-const index =
-    (global.conns || []).indexOf(
-        socket
-    )
-
-if (index !== -1) {
-    global.conns.splice(
-        index,
-        1
-    )
-}
-
-}
-
-function deleteSession(number) {
-const sessionPath =
-path.join(
-SUBBOTS_DIR,
-number
-)
-
-if (!fs.existsSync(sessionPath)) {
-    return false
-}
-
-try {
-    fs.rmSync(
-        sessionPath,
-        {
-            recursive: true,
-            force: true
-        }
-    )
-
-    return true
-} catch {
-    return false
-}
-
-}
-
-async function removeSubBotSafely(
-number,
-socket
-) {
-try {
-const module =
-await import(
-'../lib/resetsb.js'
-)
-
-    if (
-        typeof module.removeSubBot ===
-        'function'
-    ) {
-        return await module.removeSubBot(
-            number
-        )
-    }
-} catch {}
-
-closeSocket(socket)
-
-await new Promise(
-    resolve =>
-        setTimeout(
-            resolve,
-            500
-        )
-)
-
-return deleteSession(number)
-
-}
-
-async function enviarNoOwner(
+async function enviar(
 sock,
 m,
-texto
+text
 ) {
-await sock.sendMessage(
+return sock.sendMessage(
 m.chat,
 {
-text: texto
+text
 },
 {
 quoted: m
@@ -343,10 +271,12 @@ if (
     }
 
     const sockets =
-        getSubBots()
+        await getSubBots()
 
-    if (sockets.length === 0) {
-        await enviarNoOwner(
+    if (
+        sockets.length === 0
+    ) {
+        await enviar(
             sock,
             m,
             '🌐 *SubBots conectados*\n\nNo hay SubBots conectados.'
@@ -408,14 +338,10 @@ if (
             '🗑️ Para eliminar: .deletesesion 1'
         ].join('\n')
 
-    await sock.sendMessage(
-        m.chat,
-        {
-            text: response
-        },
-        {
-            quoted: m
-        }
+    await enviar(
+        sock,
+        m,
+        response
     )
 
     return
@@ -431,7 +357,7 @@ if (
     }
 
     if (!esDueno(m)) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
             '🚫 Solo el owner principal puede eliminar SubBots.'
@@ -449,23 +375,25 @@ if (
         !Number.isInteger(index) ||
         index < 1
     ) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
-            '❌ Debes indicar el número del SubBot que quieres eliminar.\n\nEjemplo:\n.deletesesion 1\n.deletesesion 2\n\nUsa .bots para ver la lista.'
+            '❌ Indica el número del SubBot.\n\nEjemplo:\n.deletesesion 1\n.deletesesion 2\n\nUsa .bots para ver la lista.'
         )
 
         return
     }
 
     const socket =
-        getSubBotByIndex(index)
+        await getSubBotByIndex(
+            index
+        )
 
     if (!socket) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
-            `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver los SubBots disponibles.`
+            `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver la lista.`
         )
 
         return
@@ -478,7 +406,7 @@ if (
         )
 
     if (!number) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
             '❌ No pude obtener el número de ese SubBot.'
@@ -487,14 +415,33 @@ if (
         return
     }
 
-    const removed =
-        await removeSubBotSafely(
-            number,
-            socket
+    let removed = false
+
+    try {
+        const module =
+            await import(
+                '../lib/resetsb.js'
+            )
+
+        if (
+            typeof module.removeSubBot ===
+            'function'
+        ) {
+            removed =
+                module.removeSubBot(
+                    number
+                )
+        }
+    } catch (error) {
+        console.error(
+            '[SUB] Error eliminando SubBot:',
+            error?.message ||
+            error
         )
+    }
 
     if (!removed) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
             `❌ No se pudo eliminar la sesión del SubBot ${index}.`
@@ -503,7 +450,7 @@ if (
         return
     }
 
-    await enviarNoOwner(
+    await enviar(
         sock,
         m,
         `🗑️ Sesión del SubBot ${index} (+${number}) eliminada correctamente.`
@@ -522,10 +469,10 @@ if (
     }
 
     if (!esDueno(m)) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
-            '🚫 Solo el owner principal puede detener SubBots.'
+            '🚫 Solo el owner puede detener SubBots.'
         )
 
         return
@@ -540,20 +487,22 @@ if (
         !Number.isInteger(index) ||
         index < 1
     ) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
-            '❌ Debes indicar el número del SubBot.\n\nEjemplo:\n.stop 1\n.stop 2\n\nUsa .bots para ver la lista.'
+            '❌ Indica el número del SubBot.\n\nEjemplo:\n.stop 1\n.stop 2\n\nUsa .bots para ver la lista.'
         )
 
         return
     }
 
     const socket =
-        getSubBotByIndex(index)
+        await getSubBotByIndex(
+            index
+        )
 
     if (!socket) {
-        await enviarNoOwner(
+        await enviar(
             sock,
             m,
             `❌ No existe un SubBot con el número ${index}.\n\nUsa .bots para ver la lista.`
@@ -568,9 +517,35 @@ if (
             socket.user?.id
         )
 
-    closeSocket(socket)
+    try {
+        const module =
+            await import(
+                '../lib/resetsb.js'
+            )
 
-    await enviarNoOwner(
+        if (
+            typeof module.stopSubBot ===
+            'function'
+        ) {
+            await module.stopSubBot(
+                number
+            )
+        } else {
+            try {
+                socket.end(
+                    undefined
+                )
+            } catch {}
+        }
+    } catch {
+        try {
+            socket.end(
+                undefined
+            )
+        } catch {}
+    }
+
+    await enviar(
         sock,
         m,
         `⏸️ SubBot ${index}${number ? ` (+${number})` : ''} detenido.`
