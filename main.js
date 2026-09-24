@@ -17,17 +17,19 @@ const {
     makeCacheableSignalKeyStore
 } = baileys
 
-const SESSION_DIR = path.join(
-    process.cwd(),
-    'sessions',
-    'exclusive'
-)
+const SESSION_DIR =
+    path.join(
+        process.cwd(),
+        'sessions',
+        'exclusive'
+    )
 
-const SUBBOTS_DIR = path.join(
-    process.cwd(),
-    'sessions',
-    'subbots'
-)
+const SUBBOTS_DIR =
+    path.join(
+        process.cwd(),
+        'sessions',
+        'subbots'
+    )
 
 fs.mkdirSync(
     SESSION_DIR,
@@ -50,8 +52,6 @@ let loginInProgress = false
 global.conn = null
 global.conns = global.conns || []
 
-// Consola principal
-
 const rl =
     readline.createInterface({
         input: process.stdin,
@@ -59,16 +59,15 @@ const rl =
     })
 
 function question(text) {
-
     return new Promise(
         resolve => {
-
             rl.question(
                 text,
                 answer => {
-
                     resolve(
-                        String(answer).trim()
+                        String(
+                            answer
+                        ).trim()
                     )
                 }
             )
@@ -76,14 +75,10 @@ function question(text) {
     )
 }
 
-// Crear conexión
-
 async function startConnection(
     method
 ) {
-
     try {
-
         const sessionExists =
             fs.existsSync(
                 path.join(
@@ -130,13 +125,28 @@ async function startConnection(
                 },
 
                 printQRInTerminal:
-                    false
+                    false,
+
+                markOnlineOnConnect:
+                    true,
+
+                syncFullHistory:
+                    false,
+
+                connectTimeoutMs:
+                    60000,
+
+                defaultQueryTimeoutMs:
+                    60000
             })
 
         conn.isMainBot =
             true
 
         conn.isSubBot =
+            false
+
+        conn.isInit =
             false
 
         conn.sessionPath =
@@ -148,20 +158,15 @@ async function startConnection(
         global.conn =
             conn
 
-        // Guardar credenciales
-
         conn.ev.on(
             'creds.update',
             saveCreds
         )
 
-        // Código de vinculación
-
         if (
             !sessionExists &&
             method === 'code'
         ) {
-
             const number =
                 await question(
                     '\n📱 Ingresa tu número (ej: 521234567890): '
@@ -179,7 +184,6 @@ async function startConnection(
                     phone
                 )
             ) {
-
                 console.log(
                     chalk.red(
                         '\n❌ Número inválido.'
@@ -210,13 +214,9 @@ async function startConnection(
                 )
             )
 
-            // Método de pairing del sistema que funciona
-
             setTimeout(
                 async () => {
-
                     try {
-
                         const code =
                             await conn.requestPairingCode(
                                 phone
@@ -243,7 +243,6 @@ async function startConnection(
                     } catch (
                         error
                     ) {
-
                         console.error(
                             chalk.red(
                                 '❌ Error generando código:'
@@ -258,27 +257,19 @@ async function startConnection(
                         loginInProgress =
                             false
                     }
-
                 },
                 3000
             )
         }
 
-        // Código QR
-
         if (
             !sessionExists &&
             method === 'qr'
         ) {
-
             conn.ev.on(
                 'connection.update',
                 ({ qr }) => {
-
-                    if (
-                        qr
-                    ) {
-
+                    if (qr) {
                         console.log(
                             chalk.green(
                                 '\n📲 Escanea este QR:\n'
@@ -296,24 +287,18 @@ async function startConnection(
             )
         }
 
-        // Eventos de conexión
-
         conn.ev.on(
             'connection.update',
             async update => {
-
                 const {
                     connection,
                     lastDisconnect
                 } = update
 
-                // Conectado
-
                 if (
                     connection ===
                     'open'
                 ) {
-
                     reconnecting =
                         false
 
@@ -325,6 +310,9 @@ async function startConnection(
 
                     conn.isSubBot =
                         false
+
+                    conn.isInit =
+                        true
 
                     global.conn =
                         conn
@@ -343,16 +331,12 @@ async function startConnection(
 
                     console.log('')
 
-                    // Iniciar handler
-
                     try {
-
                         const {
                             initHandler
                         } =
                             await import(
-                                './handler.js?update=' +
-                                Date.now()
+                                './handler.js'
                             )
 
                         await initHandler(
@@ -362,7 +346,6 @@ async function startConnection(
                     } catch (
                         error
                     ) {
-
                         console.error(
                             chalk.red(
                                 '[HANDLER] No se pudo iniciar:'
@@ -372,30 +355,24 @@ async function startConnection(
                         )
                     }
 
-                    // Cargar SubBots guardados
-
                     try {
-
                         const {
                             startSub
                         } =
                             await import(
-                                './lib/resetsb.js?update=' +
-                                Date.now()
+                                './lib/resetsb.js'
                             )
 
                         if (
                             typeof startSub ===
                             'function'
                         ) {
-
                             await startSub()
                         }
 
                     } catch (
                         error
                     ) {
-
                         console.error(
                             chalk.red(
                                 '[SUBBOT] No se pudieron cargar las sesiones:'
@@ -408,14 +385,15 @@ async function startConnection(
                     return
                 }
 
-                // Conexión cerrada
-
                 if (
                     connection !==
                     'close'
                 ) {
                     return
                 }
+
+                conn.isInit =
+                    false
 
                 const reason =
                     lastDisconnect
@@ -426,6 +404,13 @@ async function startConnection(
                         ?.error
                         ?.output
                         ?.payload
+                        ?.statusCode ??
+                    lastDisconnect
+                        ?.error
+                        ?.data
+                        ?.statusCode ??
+                    lastDisconnect
+                        ?.error
                         ?.statusCode
 
                 console.log('')
@@ -436,8 +421,6 @@ async function startConnection(
                     )
                 )
 
-                // Sesión inválida
-
                 if (
                     reason ===
                         DisconnectReason.loggedOut ||
@@ -447,7 +430,6 @@ async function startConnection(
                     reason === 403 ||
                     reason === 405
                 ) {
-
                     console.log(
                         chalk.red(
                             '[EXCLUSIVE] La sesión ya no es válida.'
@@ -466,8 +448,6 @@ async function startConnection(
                     return
                 }
 
-                // Evitar varias reconexiones
-
                 if (
                     reconnecting
                 ) {
@@ -485,9 +465,7 @@ async function startConnection(
 
                 setTimeout(
                     async () => {
-
                         try {
-
                             reconnecting =
                                 false
 
@@ -498,7 +476,6 @@ async function startConnection(
                         } catch (
                             error
                         ) {
-
                             console.error(
                                 chalk.red(
                                     '[EXCLUSIVE] Error reconectando:'
@@ -513,7 +490,6 @@ async function startConnection(
                             loginInProgress =
                                 false
                         }
-
                     },
                     3000
                 )
@@ -525,7 +501,6 @@ async function startConnection(
     } catch (
         error
     ) {
-
         loginInProgress =
             false
 
@@ -541,10 +516,7 @@ async function startConnection(
     }
 }
 
-// Menú de inicio
-
 async function loginMenu() {
-
     if (
         loginInProgress
     ) {
@@ -555,21 +527,17 @@ async function loginMenu() {
         true
 
     try {
-
         const credsPath =
             path.join(
                 SESSION_DIR,
                 'creds.json'
             )
 
-        // Sesión existente
-
         if (
             fs.existsSync(
                 credsPath
             )
         ) {
-
             console.log('')
 
             console.log(
@@ -625,7 +593,6 @@ async function loginMenu() {
             option !== '1' &&
             option !== '2'
         ) {
-
             option =
                 await question(
                     'Selecciona (1 o 2): '
@@ -635,7 +602,6 @@ async function loginMenu() {
                 option !== '1' &&
                 option !== '2'
             ) {
-
                 console.log(
                     chalk.yellow(
                         'Selecciona 1 o 2.'
@@ -653,7 +619,6 @@ async function loginMenu() {
     } catch (
         error
     ) {
-
         loginInProgress =
             false
 
@@ -667,21 +632,16 @@ async function loginMenu() {
     }
 }
 
-// Comunicación con index.js
-
 if (
     process.connected
 ) {
-
     process.on(
         'message',
         async message => {
-
             if (
                 message ===
                 'reset'
             ) {
-
                 try {
                     conn?.ws?.close()
                 } catch {}
@@ -697,7 +657,6 @@ if (
                 message ===
                 'uptime'
             ) {
-
                 process.send?.(
                     process.uptime()
                 )
@@ -705,7 +664,5 @@ if (
         }
     )
 }
-
-// Iniciar
 
 await loginMenu()
