@@ -45,9 +45,6 @@ function getPhoneFromMessage(m) {
                 .split(':')[0]
                 .replace(/\D/g, '')
 
-        // Evitar LIDs u otros identificadores
-        // que no correspondan a un número telefónico.
-
         if (
             number.length >= 8 &&
             number.length <= 15
@@ -77,7 +74,7 @@ function normalizePhone(phone) {
     return number
 }
 
-handler = {}
+let handler = {}
 
 handler.command = [
     'code'
@@ -98,7 +95,7 @@ handler.run = async (
         return
     }
 
-    // Obtener el número real del usuario.
+    // Obtener automáticamente el número del usuario.
 
     let phone =
         getPhoneFromMessage(m)
@@ -112,7 +109,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    '❌ No se pudo obtener tu número de WhatsApp.\n\nSi estás usando un grupo, asegúrate de que WhatsApp proporcione tu número telefónico y no solamente tu LID.'
+                    '❌ No se pudo obtener tu número de WhatsApp.'
             },
             {
                 quoted: m
@@ -315,8 +312,7 @@ handler.run = async (
             )
         }
 
-        // Esperar a que Baileys establezca
-        // la conexión antes de solicitar el código.
+        // Esperar antes de solicitar el código.
 
         await new Promise(
             resolve =>
@@ -360,7 +356,6 @@ handler.run = async (
             )
 
             // El código solamente se envía al chat.
-            // No se muestra en la consola.
 
             await conn.sendMessage(
                 m.chat,
@@ -505,9 +500,6 @@ handler.run = async (
                 socket.ws?.close()
             } catch {}
         }
-
-        // La carpeta solamente se elimina si la
-        // vinculación falló antes de crear una sesión válida.
 
         try {
 
