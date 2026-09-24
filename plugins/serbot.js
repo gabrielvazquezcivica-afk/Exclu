@@ -6,7 +6,8 @@ import {
     useMultiFileAuthState,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
-    makeWASocket
+    makeWASocket,
+    DisconnectReason
 } from '@whiskeysockets/baileys'
 
 const SUBBOTS_DIR = path.join(
@@ -21,18 +22,15 @@ const PAIRING_IMAGE =
 let handler = {}
 
 handler.command = [
-    'serbot',
     'code'
 ]
 
 handler.run = async (
     conn,
-    m,
-    args,
-    extra
+    m
 ) => {
 
-    // Este comando solamente puede ejecutarse desde el bot principal
+    // Solo el bot principal puede generar códigos
 
     const isMainBot =
         conn?.isMainBot === true ||
@@ -42,54 +40,19 @@ handler.run = async (
         return
     }
 
-    const command =
-        String(
-            extra?.command || ''
-        ).toLowerCase()
-
-    // Tanto .code como .serbot utilizan código de vinculación
-
-    const useCode =
-        command === 'code' ||
-        command === 'serbot'
-
-    if (!useCode) {
-        return
-    }
-
-    // Buscar el número indicado en el comando
+    // Obtener automáticamente el número del usuario
 
     let phone =
-        args.find(
-            arg =>
-                /^\+?\d{8,15}$/.test(
-                    String(arg)
-                )
-        )
-
-    // Si no se indicó número, utilizar el número del usuario
-
-    if (!phone) {
-        phone =
-            m.sender
-                ?.split('@')[0]
-                ?.replace(/\D/g, '')
-    }
-
-    phone =
-        String(
-            phone || ''
-        ).replace(
-            /\D/g,
-            ''
-        )
+        m?.sender
+            ?.split('@')[0]
+            ?.replace(/\D/g, '')
 
     if (!phone) {
         await conn.sendMessage(
             m.chat,
             {
                 text:
-                    '📱 No se pudo obtener un número válido.\n\nEjemplo:\n.code 521XXXXXXXXXX'
+                    '❌ No se pudo obtener tu número de WhatsApp.'
             },
             {
                 quoted: m
@@ -113,8 +76,6 @@ handler.run = async (
             }
         )
     }
-
-    // Ruta de la sesión
 
     const sessionPath =
         path.join(
@@ -158,7 +119,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    `🟢 El número +${phone} ya está conectado como SubBot.`
+                    `🟢 Tu número +${phone} ya está conectado como SubBot.`
             },
             {
                 quoted: m
@@ -179,7 +140,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    `📁 Ya existe una sesión guardada para +${phone}.\n\nElimina la sesión antes de volver a vincular este número.`
+                    `📁 Ya existe una sesión guardada para +${phone}.\n\nElimina esa sesión antes de volver a vincularla.`
             },
             {
                 quoted: m
@@ -188,8 +149,6 @@ handler.run = async (
 
         return
     }
-
-    // Crear carpeta de sesión
 
     fs.mkdirSync(
         sessionPath,
@@ -201,6 +160,8 @@ handler.run = async (
     let socket = null
 
     try {
+
+        // Crear estado de autenticación
 
         const {
             state,
@@ -275,9 +236,6 @@ handler.run = async (
         socket.startTime =
             Date.now()
 
-        socket.connectionStartTime =
-            Date.now()
-
         socket.ev.on(
             'creds.update',
             saveCreds
@@ -296,7 +254,7 @@ handler.run = async (
             )
         }
 
-        // Esperar un momento antes de solicitar el código
+        // Esperar a que la conexión esté lista para solicitar el código
 
         await new Promise(
             resolve =>
@@ -306,7 +264,7 @@ handler.run = async (
                 )
         )
 
-        // Generar código solamente si la cuenta todavía no está vinculada
+        // Generar código automáticamente
 
         if (
             !state.creds.registered
@@ -325,7 +283,7 @@ handler.run = async (
                     ?.join('-') ||
                 code
 
-            // Enviar la imagen al mismo chat donde se ejecutó .code
+            // Enviar el código al mismo grupo o chat
 
             await conn.sendMessage(
                 m.chat,
@@ -342,7 +300,7 @@ handler.run = async (
                 }
             )
 
-            // Enviar solamente el código al grupo/chat
+            // El código se manda al chat y NO se imprime en consola
 
             await conn.sendMessage(
                 m.chat,
@@ -356,7 +314,7 @@ handler.run = async (
             )
         }
 
-        // Escuchar cambios de conexión
+        // Controlar conexión
 
         socket.ev.on(
             'connection.update',
@@ -419,9 +377,13 @@ handler.run = async (
                     )
                 }
 
-                // Eliminar sesiones cerradas definitivamente
+                // Sesión cerrada definitivamente
 
                 if (
+                    statusCode ===
+                        DisconnectReason.loggedOut ||
+                    statusCode ===
+                        DisconnectReason.badSession ||
                     statusCode ===
                         401 ||
                     statusCode ===
@@ -463,11 +425,12 @@ handler.run = async (
             error
         )
 
-        // Quitar socket de la lista
+        // Quitar socket de las conexiones activas
 
         if (
             socket
         ) {
+
             const index =
                 global.conns.indexOf(
                     socket
@@ -501,14 +464,14 @@ handler.run = async (
             )
         } catch {}
 
-        // Avisar solamente en el chat
+        // Avisar del error en el mismo chat
 
         try {
             await conn.sendMessage(
                 m.chat,
                 {
                     text:
-                        `❌ No se pudo generar el código para +${phone}.`
+                        `❌ No se pudo generar el código de vinculación para +${phone}.`
                 },
                 {
                     quoted: m
