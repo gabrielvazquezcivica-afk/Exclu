@@ -6,7 +6,9 @@ import { smsg } from './lib/simple.js'
 const plugins = new Map()
 
 function getNumber(jid) {
-    if (!jid || typeof jid !== 'string') return ''
+    if (!jid || typeof jid !== 'string') {
+        return ''
+    }
 
     return jid
         .split('@')[0]
@@ -21,7 +23,9 @@ function isBotMessage(m) {
 }
 
 function isOldMessage(m) {
-    if (!m?.messageTimestamp) return false
+    if (!m?.messageTimestamp) {
+        return false
+    }
 
     const timestamp =
         Number(m.messageTimestamp) * 1000
@@ -34,7 +38,9 @@ function isOldMessage(m) {
 }
 
 function commandMatches(command, used) {
-    if (!command) return false
+    if (!command) {
+        return false
+    }
 
     if (typeof command === 'string') {
         return command.toLowerCase() ===
@@ -67,15 +73,19 @@ async function loadPlugins() {
     if (!fs.existsSync(pluginsDir)) {
         fs.mkdirSync(
             pluginsDir,
-            { recursive: true }
+            {
+                recursive: true
+            }
         )
     }
 
     const files =
-        fs.readdirSync(pluginsDir)
-            .filter(file =>
+        fs.readdirSync(
+            pluginsDir
+        ).filter(
+            file =>
                 file.endsWith('.js')
-            )
+        )
 
     for (const file of files) {
         const filePath =
@@ -99,9 +109,12 @@ async function loadPlugins() {
                 imported.default ||
                 imported
 
-            if (!plugin) continue
+            if (!plugin) {
+                continue
+            }
 
-            plugin.__file = file
+            plugin.__file =
+                file
 
             plugins.set(
                 file,
@@ -129,7 +142,9 @@ async function processMessage(
     sock,
     rawMessage
 ) {
-    if (!rawMessage) return
+    if (!rawMessage) {
+        return
+    }
 
     let m
 
@@ -148,7 +163,9 @@ async function processMessage(
         return
     }
 
-    if (!m) return
+    if (!m) {
+        return
+    }
 
     if (isOldMessage(m)) {
         return
@@ -171,10 +188,10 @@ async function processMessage(
             ? m.text.trim()
             : ''
 
-    m.senderNumber =
+    const senderNumber =
         getNumber(sender)
 
-    m.isBot =
+    const isBot =
         isBotMessage(m)
 
     if (!m.reply) {
@@ -183,13 +200,13 @@ async function processMessage(
             'reply',
             {
                 value: async (
-                    text,
+                    replyText,
                     options = {}
                 ) => {
                     return sock.sendMessage(
                         chat,
                         {
-                            text,
+                            text: replyText,
                             ...options
                         },
                         {
@@ -202,24 +219,32 @@ async function processMessage(
         )
     }
 
-    if (!text) return
+    if (!text) {
+        return
+    }
 
     const prefixMatch =
         text.match(
             /^[.!#$%&/?]/
         )
 
-    if (!prefixMatch) return
+    if (!prefixMatch) {
+        return
+    }
 
     const prefix =
         prefixMatch[0]
 
     const body =
         text
-            .slice(prefix.length)
+            .slice(
+                prefix.length
+            )
             .trim()
 
-    if (!body) return
+    if (!body) {
+        return
+    }
 
     const parts =
         body.split(/\s+/)
@@ -233,7 +258,9 @@ async function processMessage(
         parts
 
     for (const plugin of plugins.values()) {
-        if (!plugin) continue
+        if (!plugin) {
+            continue
+        }
 
         if (
             !commandMatches(
@@ -255,6 +282,15 @@ async function processMessage(
                 )
             }
 
+            const extra = {
+                command: used,
+                prefix,
+                text,
+                body,
+                senderNumber,
+                isBot
+            }
+
             if (
                 typeof plugin.run ===
                 'function'
@@ -263,12 +299,7 @@ async function processMessage(
                     sock,
                     m,
                     args,
-                    {
-                        command: used,
-                        prefix,
-                        text,
-                        body
-                    }
+                    extra
                 )
             } else if (
                 typeof plugin ===
@@ -277,7 +308,8 @@ async function processMessage(
                 await plugin(
                     sock,
                     m,
-                    args
+                    args,
+                    extra
                 )
             }
         } catch (error) {
