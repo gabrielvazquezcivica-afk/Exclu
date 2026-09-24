@@ -5,6 +5,11 @@ import { smsg } from './lib/simple.js'
 
 const plugins = new Map()
 
+let pluginsLoading = null
+
+const initializedSockets =
+    new WeakSet()
+
 function getNumber(jid) {
     if (!jid || typeof jid !== 'string') {
         return ''
@@ -49,7 +54,11 @@ function commandMatches(command, used) {
 
     if (Array.isArray(command)) {
         return command.some(
-            item => commandMatches(item, used)
+            item =>
+                commandMatches(
+                    item,
+                    used
+                )
         )
     }
 
@@ -62,87 +71,130 @@ function commandMatches(command, used) {
 }
 
 async function loadPlugins() {
-    plugins.clear()
-
-    const pluginsDir =
-        path.join(
-            process.cwd(),
-            'plugins'
-        )
-
-    if (!fs.existsSync(pluginsDir)) {
-        fs.mkdirSync(
-            pluginsDir,
-            {
-                recursive: true
-            }
-        )
+    if (
+        plugins.size > 0
+    ) {
+        return
     }
 
-    const files =
-        fs.readdirSync(
-            pluginsDir
-        ).filter(
-            file =>
-                file.endsWith('.js')
-        )
+    if (
+        pluginsLoading
+    ) {
+        return pluginsLoading
+    }
 
-    for (const file of files) {
-        const filePath =
-            path.join(
-                pluginsDir,
-                file
-            )
-
-        try {
-            const pluginUrl =
-                pathToFileURL(
-                    filePath
-                ).href
-
-            const imported =
-                await import(
-                    `${pluginUrl}?update=${Date.now()}`
+    pluginsLoading =
+        (async () => {
+            const pluginsDir =
+                path.join(
+                    process.cwd(),
+                    'plugins'
                 )
 
-            const plugin =
-                imported.default ||
-                imported
-
-            if (!plugin) {
-                continue
+            if (
+                !fs.existsSync(
+                    pluginsDir
+                )
+            ) {
+                fs.mkdirSync(
+                    pluginsDir,
+                    {
+                        recursive: true
+                    }
+                )
             }
 
-            plugin.__file =
-                file
+            const files =
+                fs.readdirSync(
+                    pluginsDir
+                )
+                    .filter(
+                        file =>
+                            file.endsWith(
+                                '.js'
+                            )
+                    )
 
-            plugins.set(
-                file,
-                plugin
-            )
+            for (
+                const file of files
+            ) {
+                if (
+                    plugins.has(
+                        file
+                    )
+                ) {
+                    continue
+                }
+
+                const filePath =
+                    path.join(
+                        pluginsDir,
+                        file
+                    )
+
+                try {
+                    const pluginUrl =
+                        pathToFileURL(
+                            filePath
+                        ).href
+
+                    const imported =
+                        await import(
+                            `${pluginUrl}?v=${Date.now()}`
+                        )
+
+                    const plugin =
+                        imported.default ||
+                        imported
+
+                    if (!plugin) {
+                        continue
+                    }
+
+                    plugin.__file =
+                        file
+
+                    plugins.set(
+                        file,
+                        plugin
+                    )
+
+                    console.log(
+                        `[PLUGIN] ${file} cargado.`
+                    )
+                } catch (
+                    error
+                ) {
+                    console.error(
+                        `[PLUGIN] Error cargando ${file}:`
+                    )
+
+                    console.error(
+                        error
+                    )
+                }
+            }
 
             console.log(
-                `[PLUGIN] ${file} cargado.`
+                `[PLUGIN] ${plugins.size} plugin(s) cargado(s).`
             )
-        } catch (error) {
-            console.error(
-                `[PLUGIN] Error cargando ${file}`
-            )
+        })()
 
-            console.error(error)
-        }
+    try {
+        await pluginsLoading
+    } finally {
+        pluginsLoading =
+            null
     }
-
-    console.log(
-        `[PLUGIN] ${plugins.size} plugin(s) cargado(s).`
-    )
 }
 
 async function processMessage(
     sock,
     rawMessage
 ) {
-    if (!rawMessage) {
+    if (
+        !rawMessage
+    ) {
         return
     }
 
@@ -153,8 +205,11 @@ async function processMessage(
             smsg(
                 sock,
                 rawMessage
-            ) || rawMessage
-    } catch (error) {
+            ) ||
+            rawMessage
+    } catch (
+        error
+    ) {
         console.error(
             '[HANDLER] Error serializando mensaje:',
             error
@@ -167,7 +222,11 @@ async function processMessage(
         return
     }
 
-    if (isOldMessage(m)) {
+    if (
+        isOldMessage(
+            m
+        )
+    ) {
         return
     }
 
@@ -175,6 +234,10 @@ async function processMessage(
         m.chat ||
         m.key?.remoteJid ||
         ''
+
+    if (!chat) {
+        return
+    }
 
     const sender =
         m.sender ||
@@ -187,37 +250,6 @@ async function processMessage(
         typeof m.text === 'string'
             ? m.text.trim()
             : ''
-
-    const senderNumber =
-        getNumber(sender)
-
-    const isBot =
-        isBotMessage(m)
-
-    if (!m.reply) {
-        Object.defineProperty(
-            m,
-            'reply',
-            {
-                value: async (
-                    replyText,
-                    options = {}
-                ) => {
-                    return sock.sendMessage(
-                        chat,
-                        {
-                            text: replyText,
-                            ...options
-                        },
-                        {
-                            quoted: m
-                        }
-                    )
-                },
-                configurable: true
-            }
-        )
-    }
 
     if (!text) {
         return
@@ -247,7 +279,9 @@ async function processMessage(
     }
 
     const parts =
-        body.split(/\s+/)
+        body.split(
+            /\s+/
+        )
 
     const used =
         parts
@@ -257,7 +291,63 @@ async function processMessage(
     const args =
         parts
 
-    for (const plugin of plugins.values()) {
+    const senderNumber =
+        getNumber(
+            sender
+        )
+
+    const isBot =
+        isBotMessage(
+            m
+        )
+
+    if (
+        !m.reply
+    ) {
+        Object.defineProperty(
+            m,
+            'reply',
+            {
+                value:
+                    async (
+                        replyText,
+                        options = {}
+                    ) => {
+                        if (
+                            !sock ||
+                            !sock.sendMessage
+                        ) {
+                            return null
+                        }
+
+                        return sock.sendMessage(
+                            chat,
+                            {
+                                text:
+                                    replyText,
+                                ...options
+                            },
+                            {
+                                quoted:
+                                    m
+                            }
+                        )
+                    },
+
+                configurable:
+                    true
+            }
+        )
+    }
+
+    const pluginList =
+        Array.from(
+            plugins.values()
+        )
+
+    for (
+        const plugin of pluginList
+    ) {
         if (!plugin) {
             continue
         }
@@ -271,6 +361,21 @@ async function processMessage(
             continue
         }
 
+        const extra = {
+            command:
+                used,
+
+            prefix,
+
+            text,
+
+            body,
+
+            senderNumber,
+
+            isBot
+        }
+
         try {
             if (
                 typeof plugin.before ===
@@ -280,15 +385,6 @@ async function processMessage(
                     sock,
                     m
                 )
-            }
-
-            const extra = {
-                command: used,
-                prefix,
-                text,
-                body,
-                senderNumber,
-                isBot
             }
 
             if (
@@ -312,16 +408,41 @@ async function processMessage(
                     extra
                 )
             }
-        } catch (error) {
+        } catch (
+            error
+        ) {
             console.error(
                 `[PLUGIN] Error ejecutando ${plugin.__file || used}:`
             )
 
-            console.error(error)
+            console.error(
+                error
+            )
         }
 
         break
     }
+}
+
+function runMessage(
+    sock,
+    message
+) {
+    setImmediate(
+        () => {
+            processMessage(
+                sock,
+                message
+            ).catch(
+                error => {
+                    console.error(
+                        '[HANDLER] Error procesando mensaje:',
+                        error
+                    )
+                }
+            )
+        }
+    )
 }
 
 async function handler(
@@ -337,45 +458,60 @@ async function handler(
         return
     }
 
-    await Promise.all(
-        update.messages.map(
-            message =>
-                processMessage(
-                    sock,
-                    message
-                )
+    for (
+        const message of update.messages
+    ) {
+        runMessage(
+            sock,
+            message
         )
-    )
+    }
 }
 
-async function initHandler(sock) {
+async function initHandler(
+    sock
+) {
     await loadPlugins()
+
+    if (
+        !sock ||
+        !sock.ev
+    ) {
+        return handler
+    }
+
+    if (
+        initializedSockets.has(
+            sock
+        )
+    ) {
+        return handler
+    }
+
+    initializedSockets.add(
+        sock
+    )
 
     console.log(
         '[HANDLER] Sistema de comandos iniciado.'
     )
 
-    if (
-        sock &&
-        sock.ev
-    ) {
-        sock.ev.on(
-            'messages.upsert',
-            update => {
-                handler(
-                    sock,
-                    update
-                ).catch(
-                    error => {
-                        console.error(
-                            '[HANDLER] Error procesando mensajes:',
-                            error
-                        )
-                    }
-                )
-            }
-        )
-    }
+    sock.ev.on(
+        'messages.upsert',
+        update => {
+            handler(
+                sock,
+                update
+            ).catch(
+                error => {
+                    console.error(
+                        '[HANDLER] Error procesando mensajes:',
+                        error
+                    )
+                }
+            )
+        }
+    )
 
     return handler
 }
