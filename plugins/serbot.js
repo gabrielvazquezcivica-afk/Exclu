@@ -97,6 +97,12 @@ handler.run = async (
 
     // Obtener automáticamente el número del usuario.
 
+console.log('[CODE] key:', m?.key)
+console.log('[CODE] sender:', m?.sender)
+console.log('[CODE] participant:', m?.participant)
+console.log('[CODE] participantAlt:', m?.key?.participantAlt)
+console.log('[CODE] senderPn:', m?.key?.senderPn)
+
     let phone =
         getPhoneFromMessage(m)
 
