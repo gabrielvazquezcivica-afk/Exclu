@@ -18,9 +18,6 @@ const SUBBOTS_DIR = path.join(
     'subbots'
 )
 
-const PAIRING_IMAGE =
-    'https://files.catbox.moe/n80w1o.jpg'
-
 let handler = {}
 
 handler.command = [
@@ -402,23 +399,8 @@ handler.run = async (
             await conn.sendMessage(
                 m.chat,
                 {
-                    image: {
-                        url:
-                            PAIRING_IMAGE
-                    },
-                    caption:
-                        `🔐 *CÓDIGO DE VINCULACIÓN*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*`
-                },
-                {
-                    quoted: m
-                }
-            )
-
-            await conn.sendMessage(
-                m.chat,
-                {
                     text:
-                        String(code)
+                        `🔐 *CÓDIGO DE VINCULACIÓN*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*\n\n*${code}*`
                 },
                 {
                     quoted: m
@@ -565,7 +547,7 @@ handler.run = async (
                 m.chat,
                 {
                     text:
-                        `❌ No se pudo generar el código para +${phone}.\n\nEstado: ${statusCode ?? 'desconocido'}`
+                        `❌ No se pudo completar la vinculación para +${phone}.\n\nEstado: ${statusCode ?? 'desconocido'}`
                 },
                 {
                     quoted: m
