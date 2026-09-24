@@ -16,7 +16,61 @@ global.exclusiveStartedAt =
     global.exclusiveStartedAt ||
     Date.now()
 
-// Obtener texto del mensaje
+async function resolveLid(
+    sock,
+    jid
+) {
+
+    if (
+        !jid ||
+        typeof jid !== 'string'
+    ) {
+        return jid
+    }
+
+    if (
+        !jid.endsWith('@lid')
+    ) {
+        return jid
+    }
+
+    try {
+
+        const mapping =
+            sock?.signalRepository
+                ?.lidMapping
+
+        if (
+            mapping &&
+            typeof mapping.getPNForLID ===
+            'function'
+        ) {
+
+            const phone =
+                await mapping.getPNForLID(
+                    jid
+                )
+
+            if (
+                phone
+            ) {
+                return phone
+            }
+        }
+
+    } catch (
+        error
+    ) {
+
+        console.log(
+            chalk.yellow(
+                `[LID] No se pudo resolver ${jid}: ${error?.message || error}`
+            )
+        )
+    }
+
+    return jid
+}
 
 function getText(m) {
 
@@ -67,8 +121,6 @@ function getText(m) {
     return ''
 }
 
-// Obtener número del JID
-
 function getNumber(jid) {
 
     if (
@@ -85,8 +137,6 @@ function getNumber(jid) {
             ''
         )
 }
-
-// Comprobar si el mensaje viene del propio bot
 
 function isBotMessage(
     sock,
@@ -132,8 +182,6 @@ function isBotMessage(
     )
 }
 
-// Ignorar mensajes anteriores al arranque
-
 function isOldMessage(m) {
 
     const timestamp =
@@ -160,8 +208,6 @@ function isOldMessage(m) {
         global.exclusiveStartedAt
     )
 }
-
-// Comprobar comando
 
 function commandMatches(
     pluginCommand,
@@ -228,8 +274,6 @@ function commandMatches(
 
     return false
 }
-
-// Cargar plugins
 
 async function loadPlugins() {
 
@@ -334,8 +378,6 @@ async function loadPlugins() {
     )
 }
 
-// Procesar mensaje
-
 async function processMessage(
     sock,
     m
@@ -415,10 +457,24 @@ async function processMessage(
     m.chat =
         m.key.remoteJid
 
-    m.sender =
+    const rawSender =
         m.key.participant ||
         m.participant ||
         m.key.remoteJid
+
+    const resolvedSender =
+        await resolveLid(
+            sock,
+            rawSender
+        )
+
+    m.sender =
+        resolvedSender
+
+    m.senderLid =
+        rawSender?.endsWith('@lid')
+            ? rawSender
+            : null
 
     m.isGroup =
         m.chat?.endsWith(
@@ -568,8 +624,6 @@ async function processMessage(
     }
 }
 
-// Procesar actualizaciones
-
 export async function handler(
     sock,
     update
@@ -580,9 +634,6 @@ export async function handler(
     ) {
         return
     }
-
-    // Procesar cada mensaje
-    // sin bloquear otros chats
 
     await Promise.all(
         update.messages.map(
@@ -610,8 +661,6 @@ export async function handler(
         )
     )
 }
-
-// Iniciar handler
 
 export async function initHandler(
     sock
