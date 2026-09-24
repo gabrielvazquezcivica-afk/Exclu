@@ -5,33 +5,6 @@ import { smsg } from './lib/simple.js'
 
 const plugins = new Map()
 
-function getText(m) {
-    if (!m) return ''
-
-    if (typeof m.text === 'string') {
-        return m.text
-    }
-
-    const msg = m.message
-
-    if (!msg) return ''
-
-    const type = Object.keys(msg)[0]
-    const content = msg[type]
-
-    if (typeof content === 'string') {
-        return content
-    }
-
-    return (
-        content?.text ||
-        content?.caption ||
-        content?.contentText ||
-        content?.selectedDisplayText ||
-        ''
-    )
-}
-
 function getNumber(jid) {
     if (!jid || typeof jid !== 'string') return ''
 
@@ -75,6 +48,7 @@ function commandMatches(command, used) {
     }
 
     if (command instanceof RegExp) {
+        command.lastIndex = 0
         return command.test(used)
     }
 
@@ -85,7 +59,10 @@ async function loadPlugins() {
     plugins.clear()
 
     const pluginsDir =
-        path.join(process.cwd(), 'plugins')
+        path.join(
+            process.cwd(),
+            'plugins'
+        )
 
     if (!fs.existsSync(pluginsDir)) {
         fs.mkdirSync(
@@ -139,9 +116,7 @@ async function loadPlugins() {
                 `[PLUGIN] Error cargando ${file}`
             )
 
-            console.error(
-                error
-            )
+            console.error(error)
         }
     }
 
@@ -170,7 +145,7 @@ async function processMessage(
             error
         )
 
-        m = rawMessage
+        return
     }
 
     if (!m) return
@@ -179,58 +154,53 @@ async function processMessage(
         return
     }
 
-    m.text =
-        getText(m)
-
-    m.chat =
+    const chat =
         m.chat ||
         m.key?.remoteJid ||
         ''
 
-    m.sender =
+    const sender =
         m.sender ||
         m.key?.participant ||
         m.participant ||
-        m.chat ||
+        chat ||
         ''
-
-    m.isGroup =
-        typeof m.isGroup === 'boolean'
-            ? m.isGroup
-            : m.chat.endsWith('@g.us')
-
-    m.senderNumber =
-        getNumber(
-            m.sender
-        )
-
-    m.isBot =
-        isBotMessage(m)
-
-    m.reply =
-        m.reply?.bind(m) ||
-        (
-            async (
-                text,
-                options = {}
-            ) => {
-                return sock.sendMessage(
-                    m.chat,
-                    {
-                        text,
-                        ...options
-                    },
-                    {
-                        quoted: m
-                    }
-                )
-            }
-        )
 
     const text =
         typeof m.text === 'string'
             ? m.text.trim()
             : ''
+
+    m.senderNumber =
+        getNumber(sender)
+
+    m.isBot =
+        isBotMessage(m)
+
+    if (!m.reply) {
+        Object.defineProperty(
+            m,
+            'reply',
+            {
+                value: async (
+                    text,
+                    options = {}
+                ) => {
+                    return sock.sendMessage(
+                        chat,
+                        {
+                            text,
+                            ...options
+                        },
+                        {
+                            quoted: m
+                        }
+                    )
+                },
+                configurable: true
+            }
+        )
+    }
 
     if (!text) return
 
@@ -255,7 +225,8 @@ async function processMessage(
         body.split(/\s+/)
 
     const used =
-        parts.shift()
+        parts
+            .shift()
             .toLowerCase()
 
     const args =
@@ -314,9 +285,7 @@ async function processMessage(
                 `[PLUGIN] Error ejecutando ${plugin.__file || used}:`
             )
 
-            console.error(
-                error
-            )
+            console.error(error)
         }
 
         break
@@ -360,7 +329,7 @@ async function initHandler(sock) {
     ) {
         sock.ev.on(
             'messages.upsert',
-            update =>
+            update => {
                 handler(
                     sock,
                     update
@@ -372,6 +341,7 @@ async function initHandler(sock) {
                         )
                     }
                 )
+            }
         )
     }
 
