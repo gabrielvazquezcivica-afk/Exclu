@@ -1,7 +1,13 @@
 import * as baileys from '@whiskeysockets/baileys'
 
+import fs from 'fs'
+import path from 'path'
+import pino from 'pino'
+import chalk from 'chalk'
+import readline from 'readline'
+import qrcode from 'qrcode-terminal'
+
 const makeWASocket =
-    baileys.default ||
     baileys.makeWASocket
 
 const {
@@ -10,13 +16,6 @@ const {
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore
 } = baileys
-
-import fs from 'fs'
-import path from 'path'
-import pino from 'pino'
-import chalk from 'chalk'
-import readline from 'readline'
-import qrcode from 'qrcode-terminal'
 
 const SESSION_DIR = path.join(
     process.cwd(),
@@ -51,7 +50,7 @@ let loginInProgress = false
 global.conn = null
 global.conns = global.conns || []
 
-// Consola
+// Consola principal
 
 const rl =
     readline.createInterface({
@@ -69,7 +68,7 @@ function question(text) {
                 answer => {
 
                     resolve(
-                        answer.trim()
+                        String(answer).trim()
                     )
                 }
             )
@@ -183,24 +182,35 @@ async function startConnection(
 
                 console.log(
                     chalk.red(
-                        '\n❌ Número inválido.\n'
+                        '\n❌ Número inválido.'
                     )
                 )
 
+                console.log(
+                    chalk.gray(
+                        'Ejemplo: 521234567890'
+                    )
+                )
+
+                console.log('')
+
                 loginInProgress =
                     false
+
+                try {
+                    conn.ws?.close()
+                } catch {}
 
                 return
             }
 
             console.log(
                 chalk.cyan(
-                    '\n⏳ Generando código de vinculación...\n'
+                    '\n⏳ Preparando vinculación...'
                 )
             )
 
-            // Método de vinculación
-            // tomado del código que sí funciona
+            // Método de pairing del sistema que funciona
 
             setTimeout(
                 async () => {
@@ -212,25 +222,41 @@ async function startConnection(
                                 phone
                             )
 
+                        console.log('')
+
                         console.log(
                             chalk.green(
-                                `\n🔑 Código de vinculación: ${code}\n`
+                                `🔑 Código de vinculación: ${code}`
                             )
                         )
+
+                        console.log('')
+
+                        console.log(
+                            chalk.gray(
+                                'WhatsApp → Dispositivos vinculados → Vincular con número de teléfono'
+                            )
+                        )
+
+                        console.log('')
 
                     } catch (
                         error
                     ) {
 
-                        console.log(
+                        console.error(
                             chalk.red(
-                                '❌ Error generando código'
+                                '❌ Error generando código:'
                             )
                         )
 
                         console.error(
+                            error?.message ||
                             error
                         )
+
+                        loginInProgress =
+                            false
                     }
 
                 },
@@ -238,7 +264,7 @@ async function startConnection(
             )
         }
 
-        // QR
+        // Código QR
 
         if (
             !sessionExists &&
@@ -280,6 +306,8 @@ async function startConnection(
                     connection,
                     lastDisconnect
                 } = update
+
+                // Conectado
 
                 if (
                     connection ===
@@ -344,7 +372,7 @@ async function startConnection(
                         )
                     }
 
-                    // Cargar SubBots
+                    // Cargar SubBots guardados
 
                     try {
 
@@ -380,6 +408,8 @@ async function startConnection(
                     return
                 }
 
+                // Conexión cerrada
+
                 if (
                     connection !==
                     'close'
@@ -391,7 +421,14 @@ async function startConnection(
                     lastDisconnect
                         ?.error
                         ?.output
+                        ?.statusCode ??
+                    lastDisconnect
+                        ?.error
+                        ?.output
+                        ?.payload
                         ?.statusCode
+
+                console.log('')
 
                 console.log(
                     chalk.red(
@@ -423,10 +460,13 @@ async function startConnection(
                         )
                     )
 
+                    loginInProgress =
+                        false
+
                     return
                 }
 
-                // Reconexión
+                // Evitar varias reconexiones
 
                 if (
                     reconnecting
@@ -469,6 +509,9 @@ async function startConnection(
 
                             reconnecting =
                                 false
+
+                            loginInProgress =
+                                false
                         }
 
                     },
@@ -498,7 +541,7 @@ async function startConnection(
     }
 }
 
-// Menú principal
+// Menú de inicio
 
 async function loginMenu() {
 
