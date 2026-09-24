@@ -4,7 +4,6 @@ import pino from 'pino'
 
 import {
     useMultiFileAuthState,
-    fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
     makeWASocket,
     DisconnectReason
@@ -197,10 +196,11 @@ handler.run = async (
                 sessionPath
             )
 
-        const {
-            version
-        } =
-            await fetchLatestBaileysVersion()
+        const version = [
+    2,
+    3000,
+    1027934701
+]
 
         socket =
             makeWASocket({
