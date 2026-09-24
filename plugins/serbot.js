@@ -52,6 +52,217 @@ function getStatusCode(error) {
     )
 }
 
+async function getVersion() {
+    if (
+        typeof fetchLatestWaWebVersion ===
+        'function'
+    ) {
+        try {
+            const result =
+                await fetchLatestWaWebVersion()
+
+            if (
+                Array.isArray(
+                    result?.version
+                )
+            ) {
+                return result.version
+            }
+        } catch {}
+    }
+
+    return [
+        2,
+        3000,
+        1048361770
+    ]
+}
+
+function createSocket(
+    state,
+    version
+) {
+    const sock =
+        makeWASocket({
+            version,
+
+            logger:
+                pino({
+                    level:
+                        'silent'
+                }),
+
+            auth: {
+                creds:
+                    state.creds,
+
+                keys:
+                    makeCacheableSignalKeyStore(
+                        state.keys,
+                        pino({
+                            level:
+                                'silent'
+                        })
+                    )
+            },
+
+            browser: [
+                'Chrome',
+                'Chrome',
+                '120.0.0.0'
+            ],
+
+            printQRInTerminal:
+                false,
+
+            markOnlineOnConnect:
+                true,
+
+            syncFullHistory:
+                false,
+
+            connectTimeoutMs:
+                60000,
+
+            defaultQueryTimeoutMs:
+                60000
+        })
+
+    return sock
+}
+
+async function connectAfterPairing(
+    phone,
+    sessionPath
+) {
+    console.log(
+        `[SUBBOT] Reiniciando sesión de +${phone} después del pairing...`
+    )
+
+    const {
+        state,
+        saveCreds
+    } =
+        await useMultiFileAuthState(
+            sessionPath
+        )
+
+    const version =
+        await getVersion()
+
+    const sock =
+        createSocket(
+            state,
+            version
+        )
+
+    sock.isSubBot =
+        true
+
+    sock.isMainBot =
+        false
+
+    sock.isInit =
+        false
+
+    sock.subBotNumber =
+        phone
+
+    sock.subBotJid =
+        `${phone}@s.whatsapp.net`
+
+    sock.sessionPath =
+        sessionPath
+
+    sock.startTime =
+        Date.now()
+
+    sock.ev.on(
+        'creds.update',
+        saveCreds
+    )
+
+    global.conns =
+        global.conns || []
+
+    global.conns =
+        global.conns.filter(
+            item =>
+                item?.subBotNumber !==
+                phone
+        )
+
+    global.conns.push(
+        sock
+    )
+
+    sock.ev.on(
+        'connection.update',
+        update => {
+            const {
+                connection,
+                lastDisconnect
+            } = update
+
+            if (
+                connection ===
+                'open'
+            ) {
+                sock.isInit =
+                    true
+
+                console.log(
+                    `[SUBBOT] +${phone} conectado correctamente después del pairing.`
+                )
+
+                return
+            }
+
+            if (
+                connection !==
+                'close'
+            ) {
+                return
+            }
+
+            sock.isInit =
+                false
+
+            const statusCode =
+                getStatusCode(
+                    lastDisconnect?.error
+                )
+
+            console.log(
+                `[SUBBOT] +${phone} desconectado después del pairing | Código: ${statusCode ?? 'desconocido'}`
+            )
+
+            if (
+                statusCode ===
+                DisconnectReason.loggedOut
+            ) {
+                try {
+                    fs.rmSync(
+                        sessionPath,
+                        {
+                            recursive:
+                                true,
+                            force:
+                                true
+                        }
+                    )
+                } catch {}
+
+                console.log(
+                    `[SUBBOT] Sesión eliminada: +${phone}`
+                )
+            }
+        }
+    )
+
+    return sock
+}
+
 handler.run = async (
     conn,
     m,
@@ -83,11 +294,10 @@ handler.run = async (
         return
     }
 
-    const input =
-        args.join(' ')
-
     const phone =
-        normalizePhone(input)
+        normalizePhone(
+            args.join(' ')
+        )
 
     if (!phone) {
         await conn.sendMessage(
@@ -116,7 +326,8 @@ handler.run = async (
         fs.mkdirSync(
             SUBBOTS_DIR,
             {
-                recursive: true
+                recursive:
+                    true
             }
         )
     }
@@ -136,27 +347,14 @@ handler.run = async (
     global.conns =
         global.conns || []
 
-    const connected =
+    const existing =
         global.conns.find(
-            socket => {
-                if (
-                    !socket?.isSubBot
-                ) {
-                    return false
-                }
-
-                const number =
-                    normalizePhone(
-                        socket.subBotNumber ||
-                        socket.subBotJid ||
-                        socket.user?.id
-                    )
-
-                return number === phone
-            }
+            socket =>
+                socket?.subBotNumber ===
+                phone
         )
 
-    if (connected) {
+    if (existing) {
         await conn.sendMessage(
             m.chat,
             {
@@ -180,7 +378,7 @@ handler.run = async (
             m.chat,
             {
                 text:
-                    `📁 Ya existe una sesión guardada para +${phone}.\n\nSi quieres volver a vincularlo, elimina primero la carpeta:\n\nsessions/subbots/${phone}`
+                    `📁 Ya existe una sesión guardada para +${phone}.\n\nSi quieres volver a vincularla, elimina primero:\n\nsessions/subbots/${phone}`
             },
             {
                 quoted: m
@@ -193,7 +391,8 @@ handler.run = async (
     fs.mkdirSync(
         sessionPath,
         {
-            recursive: true
+            recursive:
+                true
         }
     )
 
@@ -212,95 +411,22 @@ handler.run = async (
                 sessionPath
             )
 
-        let version
+        const version =
+            await getVersion()
 
-        if (
-            typeof fetchLatestWaWebVersion ===
-            'function'
-        ) {
-            console.log(
-                '[CODE] Obteniendo versión actual de WhatsApp Web...'
-            )
-
-            const result =
-                await fetchLatestWaWebVersion()
-
-            version =
-                result?.version
-
-            console.log(
-                `[CODE] WhatsApp Web: ${version?.join('.') || 'desconocida'}`
-            )
-        } else {
-            console.log(
-                '[CODE] fetchLatestWaWebVersion no está disponible. Usando versión de respaldo.'
-            )
-
-            version = [
-                2,
-                3000,
-                1042466098
-            ]
-        }
-
-        if (
-            !Array.isArray(version) ||
-            version.length !== 3
-        ) {
-            throw new Error(
-                'No se pudo obtener una versión válida de WhatsApp Web.'
-            )
-        }
+        console.log(
+            `[CODE] WhatsApp Web: ${version.join('.')}`
+        )
 
         console.log(
             '[CODE] Creando socket...'
         )
 
         socket =
-            makeWASocket({
-                auth: {
-                    creds:
-                        state.creds,
-
-                    keys:
-                        makeCacheableSignalKeyStore(
-                            state.keys,
-                            pino({
-                                level:
-                                    'silent'
-                            })
-                        )
-                },
-
-                logger:
-                    pino({
-                        level:
-                            'silent'
-                    }),
-
-                browser: [
-                    'Chrome',
-                    'Chrome',
-                    '120.0.0.0'
-                ],
-
-                version,
-
-                printQRInTerminal:
-                    false,
-
-                markOnlineOnConnect:
-                    true,
-
-                generateHighQualityLinkPreview:
-                    true,
-
-                connectTimeoutMs:
-                    60000,
-
-                defaultQueryTimeoutMs:
-                    60000
-            })
+            createSocket(
+                state,
+                version
+            )
 
         socket.isSubBot =
             true
@@ -308,35 +434,23 @@ handler.run = async (
         socket.isMainBot =
             false
 
-        socket.isInit =
-            false
+        socket.subBotNumber =
+            phone
 
         socket.subBotJid =
             `${phone}@s.whatsapp.net`
 
-        socket.subBotNumber =
-            phone
-
         socket.sessionPath =
             sessionPath
 
-        socket.startTime =
-            Date.now()
+        global.conns.push(
+            socket
+        )
 
         socket.ev.on(
             'creds.update',
             saveCreds
         )
-
-        if (
-            !global.conns.includes(
-                socket
-            )
-        ) {
-            global.conns.push(
-                socket
-            )
-        }
 
         console.log(
             '[CODE] Socket creado correctamente.'
@@ -365,20 +479,10 @@ handler.run = async (
                         phone
                     )
             } catch (error) {
-                const statusCode =
-                    getStatusCode(error)
-
                 console.error(
-                    '[CODE] Error en requestPairingCode:'
-                )
-
-                console.error(
-                    error?.stack ||
+                    '[CODE] Error solicitando código:',
+                    error?.message ||
                     error
-                )
-
-                console.error(
-                    `[CODE] StatusCode: ${statusCode ?? 'desconocido'}`
                 )
 
                 throw error
@@ -403,102 +507,88 @@ handler.run = async (
                         `🔐 *CÓDIGO DE VINCULACIÓN*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*\n\n*${code}*`
                 },
                 {
-                    quoted: m
+                    quoted:
+                        m
                 }
             )
-        } else {
-            console.log(
-                `[CODE] La sesión +${phone} ya estaba registrada.`
-            )
-        }
 
-        socket.ev.on(
-            'connection.update',
-            async update => {
-                const {
-                    connection,
-                    lastDisconnect
-                } = update
+            socket.ev.on(
+                'connection.update',
+                async update => {
+                    const {
+                        connection,
+                        lastDisconnect
+                    } = update
 
-                if (
-                    connection ===
-                    'open'
-                ) {
-                    socket.isInit =
-                        true
+                    if (
+                        connection !==
+                        'close'
+                    ) {
+                        return
+                    }
+
+                    const statusCode =
+                        getStatusCode(
+                            lastDisconnect?.error
+                        )
+
+                    if (
+                        statusCode !==
+                        DisconnectReason.restartRequired
+                    ) {
+                        return
+                    }
 
                     console.log(
-                        `[SUBBOT] +${phone} conectado correctamente.`
+                        `[SUBBOT] +${phone} recibió 515.`
                     )
 
-                    return
-                }
-
-                if (
-                    connection !==
-                    'close'
-                ) {
-                    return
-                }
-
-                socket.isInit =
-                    false
-
-                const statusCode =
-                    getStatusCode(
-                        lastDisconnect?.error
-                    )
-
-                const index =
-                    global.conns.indexOf(
-                        socket
-                    )
-
-                if (
-                    index !== -1
-                ) {
-                    global.conns.splice(
-                        index,
-                        1
-                    )
-                }
-
-                if (
-                    statusCode ===
-                        DisconnectReason.loggedOut ||
-                    statusCode ===
-                        DisconnectReason.badSession ||
-                    statusCode === 401 ||
-                    statusCode === 403 ||
-                    statusCode === 405
-                ) {
-                    try {
-                        fs.rmSync(
-                            sessionPath,
-                            {
-                                recursive:
-                                    true,
-                                force:
-                                    true
-                            }
+                    const index =
+                        global.conns.indexOf(
+                            socket
                         )
+
+                    if (
+                        index !== -1
+                    ) {
+                        global.conns.splice(
+                            index,
+                            1
+                        )
+                    }
+
+                    try {
+                        socket.ws?.close()
                     } catch {}
 
-                    console.log(
-                        `[SUBBOT] Sesión eliminada: +${phone}`
+                    await new Promise(
+                        resolve =>
+                            setTimeout(
+                                resolve,
+                                1500
+                            )
                     )
 
-                    return
+                    try {
+                        await connectAfterPairing(
+                            phone,
+                            sessionPath
+                        )
+                    } catch (error) {
+                        console.error(
+                            `[SUBBOT] Error reconectando +${phone}:`,
+                            error?.message ||
+                            error
+                        )
+                    }
                 }
-
-                console.log(
-                    `[SUBBOT] Conexión cerrada: +${phone} | Código: ${statusCode ?? 'desconocido'}`
-                )
-            }
-        )
+            )
+        }
     } catch (error) {
         const statusCode =
-            getStatusCode(error)
+            getStatusCode(
+                error
+            )
 
         console.error(
             `[SUBBOT] Error iniciando +${phone}:`,
@@ -507,7 +597,7 @@ handler.run = async (
         )
 
         console.error(
-            `[SUBBOT] Código HTTP/estado: ${statusCode ?? 'desconocido'}`
+            `[SUBBOT] Estado: ${statusCode ?? 'desconocido'}`
         )
 
         if (socket) {
@@ -547,10 +637,11 @@ handler.run = async (
                 m.chat,
                 {
                     text:
-                        `❌ No se pudo completar la vinculación para +${phone}.\n\nEstado: ${statusCode ?? 'desconocido'}`
+                        `❌ No se pudo iniciar la vinculación para +${phone}.`
                 },
                 {
-                    quoted: m
+                    quoted:
+                        m
                 }
             )
         } catch {}
