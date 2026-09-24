@@ -19,7 +19,65 @@ const SUBBOTS_DIR = path.join(
 const PAIRING_IMAGE =
     'https://files.catbox.moe/n80w1o.jpg'
 
-let handler = {}
+function getPhoneFromMessage(m) {
+
+    const candidates = [
+        m?.key?.participantAlt,
+        m?.participantAlt,
+        m?.key?.senderPn,
+        m?.senderPn,
+        m?.key?.participant,
+        m?.sender
+    ]
+
+    for (
+        const value of candidates
+    ) {
+
+        if (!value) continue
+
+        const raw =
+            String(value)
+
+        const number =
+            raw
+                .split('@')[0]
+                .split(':')[0]
+                .replace(/\D/g, '')
+
+        // Evitar LIDs u otros identificadores
+        // que no correspondan a un número telefónico.
+
+        if (
+            number.length >= 8 &&
+            number.length <= 15
+        ) {
+            return number
+        }
+    }
+
+    return null
+}
+
+function normalizePhone(phone) {
+
+    if (!phone) return null
+
+    const number =
+        String(phone)
+            .replace(/\D/g, '')
+
+    if (
+        number.length < 8 ||
+        number.length > 15
+    ) {
+        return null
+    }
+
+    return number
+}
+
+handler = {}
 
 handler.command = [
     'code'
@@ -30,7 +88,7 @@ handler.run = async (
     m
 ) => {
 
-    // Solo el bot principal puede generar códigos
+    // Solo el bot principal puede generar códigos.
 
     const isMainBot =
         conn?.isMainBot === true ||
@@ -40,19 +98,21 @@ handler.run = async (
         return
     }
 
-    // Obtener automáticamente el número del usuario
+    // Obtener el número real del usuario.
 
     let phone =
-        m?.sender
-            ?.split('@')[0]
-            ?.replace(/\D/g, '')
+        getPhoneFromMessage(m)
+
+    phone =
+        normalizePhone(phone)
 
     if (!phone) {
+
         await conn.sendMessage(
             m.chat,
             {
                 text:
-                    '❌ No se pudo obtener tu número de WhatsApp.'
+                    '❌ No se pudo obtener tu número de WhatsApp.\n\nSi estás usando un grupo, asegúrate de que WhatsApp proporcione tu número telefónico y no solamente tu LID.'
             },
             {
                 quoted: m
@@ -62,13 +122,12 @@ handler.run = async (
         return
     }
 
-    // Crear carpeta de SubBots
-
     if (
         !fs.existsSync(
             SUBBOTS_DIR
         )
     ) {
+
         fs.mkdirSync(
             SUBBOTS_DIR,
             {
@@ -89,7 +148,7 @@ handler.run = async (
             'creds.json'
         )
 
-    // Comprobar si ya existe un SubBot conectado
+    // Comprobar si ya existe un SubBot conectado.
 
     const connected =
         global.conns?.find(
@@ -108,13 +167,17 @@ handler.run = async (
                         ''
                     )
                         .split('@')[0]
+                        .split(':')[0]
                         .replace(/\D/g, '')
 
-                return number === phone
+                return (
+                    number === phone
+                )
             }
         )
 
     if (connected) {
+
         await conn.sendMessage(
             m.chat,
             {
@@ -129,13 +192,14 @@ handler.run = async (
         return
     }
 
-    // Comprobar si ya existe una sesión guardada
+    // Comprobar si ya existe una sesión guardada.
 
     if (
         fs.existsSync(
             credsPath
         )
     ) {
+
         await conn.sendMessage(
             m.chat,
             {
@@ -161,8 +225,6 @@ handler.run = async (
 
     try {
 
-        // Crear estado de autenticación
-
         const {
             state,
             saveCreds
@@ -175,8 +237,6 @@ handler.run = async (
             version
         } =
             await fetchLatestBaileysVersion()
-
-        // Crear conexión del SubBot
 
         socket =
             makeWASocket({
@@ -249,22 +309,22 @@ handler.run = async (
                 socket
             )
         ) {
+
             global.conns.push(
                 socket
             )
         }
 
-        // Esperar a que la conexión esté lista para solicitar el código
+        // Esperar a que Baileys establezca
+        // la conexión antes de solicitar el código.
 
         await new Promise(
             resolve =>
                 setTimeout(
                     resolve,
-                    1500
+                    3000
                 )
         )
-
-        // Generar código automáticamente
 
         if (
             !state.creds.registered
@@ -283,8 +343,6 @@ handler.run = async (
                     ?.join('-') ||
                 code
 
-            // Enviar el código al mismo grupo o chat
-
             await conn.sendMessage(
                 m.chat,
                 {
@@ -292,6 +350,7 @@ handler.run = async (
                         url:
                             PAIRING_IMAGE
                     },
+
                     caption:
                         `🔐 *Código de vinculación*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*`
                 },
@@ -300,7 +359,8 @@ handler.run = async (
                 }
             )
 
-            // El código se manda al chat y NO se imprime en consola
+            // El código solamente se envía al chat.
+            // No se muestra en la consola.
 
             await conn.sendMessage(
                 m.chat,
@@ -313,8 +373,6 @@ handler.run = async (
                 }
             )
         }
-
-        // Controlar conexión
 
         socket.ev.on(
             'connection.update',
@@ -361,8 +419,6 @@ handler.run = async (
                         ?.payload
                         ?.statusCode
 
-                // Quitar socket de las conexiones activas
-
                 const index =
                     global.conns.indexOf(
                         socket
@@ -371,13 +427,12 @@ handler.run = async (
                 if (
                     index !== -1
                 ) {
+
                     global.conns.splice(
                         index,
                         1
                     )
                 }
-
-                // Sesión cerrada definitivamente
 
                 if (
                     statusCode ===
@@ -393,6 +448,7 @@ handler.run = async (
                 ) {
 
                     try {
+
                         fs.rmSync(
                             sessionPath,
                             {
@@ -402,6 +458,7 @@ handler.run = async (
                                     true
                             }
                         )
+
                     } catch {}
 
                     console.log(
@@ -425,8 +482,6 @@ handler.run = async (
             error
         )
 
-        // Quitar socket de las conexiones activas
-
         if (
             socket
         ) {
@@ -439,6 +494,7 @@ handler.run = async (
             if (
                 index !== -1
             ) {
+
                 global.conns.splice(
                     index,
                     1
@@ -450,23 +506,32 @@ handler.run = async (
             } catch {}
         }
 
-        // Eliminar sesión incompleta
+        // La carpeta solamente se elimina si la
+        // vinculación falló antes de crear una sesión válida.
 
         try {
-            fs.rmSync(
-                sessionPath,
-                {
-                    recursive:
-                        true,
-                    force:
-                        true
-                }
-            )
+
+            if (
+                !fs.existsSync(
+                    credsPath
+                )
+            ) {
+
+                fs.rmSync(
+                    sessionPath,
+                    {
+                        recursive:
+                            true,
+                        force:
+                            true
+                    }
+                )
+            }
+
         } catch {}
 
-        // Avisar del error en el mismo chat
-
         try {
+
             await conn.sendMessage(
                 m.chat,
                 {
@@ -477,6 +542,7 @@ handler.run = async (
                     quoted: m
                 }
             )
+
         } catch {}
     }
 }
