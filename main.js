@@ -3,13 +3,13 @@ import path from 'path'
 import pino from 'pino'
 import chalk from 'chalk'
 import readline from 'readline'
+import qrcode from 'qrcode-terminal'
 
-import {
-    makeWASocket,
+import makeWASocket, {
     useMultiFileAuthState,
+    DisconnectReason,
     fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore,
-    DisconnectReason
+    makeCacheableSignalKeyStore
 } from '@whiskeysockets/baileys'
 
 const SESSION_DIR = path.join(
@@ -45,29 +45,477 @@ let loginInProgress = false
 global.conn = null
 global.conns = global.conns || []
 
-// Preguntar por consola
+// Consola principal
+
+const rl =
+    readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    })
 
 function question(text) {
-    const rl =
-        readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        })
 
-    return new Promise(resolve => {
+    return new Promise(
+        resolve => {
 
-        rl.question(
-            text,
-            answer => {
+            rl.question(
+                text,
+                answer => {
 
-                rl.close()
+                    resolve(
+                        answer.trim()
+                    )
+                }
+            )
+        }
+    )
+}
 
-                resolve(
-                    answer.trim()
+// Crear conexión
+
+async function startConnection(
+    method
+) {
+
+    try {
+
+        const sessionExists =
+            fs.existsSync(
+                path.join(
+                    SESSION_DIR,
+                    'creds.json'
+                )
+            )
+
+        const {
+            state,
+            saveCreds
+        } =
+            await useMultiFileAuthState(
+                SESSION_DIR
+            )
+
+        const {
+            version
+        } =
+            await fetchLatestBaileysVersion()
+
+        conn =
+            makeWASocket({
+                version,
+
+                logger:
+                    pino({
+                        level:
+                            'silent'
+                    }),
+
+                auth: {
+                    creds:
+                        state.creds,
+
+                    keys:
+                        makeCacheableSignalKeyStore(
+                            state.keys,
+                            pino({
+                                level:
+                                    'silent'
+                            })
+                        )
+                },
+
+                printQRInTerminal:
+                    false
+            })
+
+        conn.isMainBot =
+            true
+
+        conn.isSubBot =
+            false
+
+        conn.sessionPath =
+            SESSION_DIR
+
+        conn.startTime =
+            Date.now()
+
+        global.conn =
+            conn
+
+        // Guardar credenciales
+
+        conn.ev.on(
+            'creds.update',
+            saveCreds
+        )
+
+        // Código de vinculación
+
+        if (
+            !sessionExists &&
+            method === 'code'
+        ) {
+
+            const number =
+                await question(
+                    '\n📱 Ingresa tu número (ej: 521234567890): '
+                )
+
+            const phone =
+                String(number)
+                    .replace(
+                        /\D/g,
+                        ''
+                    )
+
+            if (
+                !/^\d{8,15}$/.test(
+                    phone
+                )
+            ) {
+
+                console.log(
+                    chalk.red(
+                        '\n❌ Número inválido.\n'
+                    )
+                )
+
+                loginInProgress =
+                    false
+
+                return
+            }
+
+            console.log(
+                chalk.cyan(
+                    '\n⏳ Generando código de vinculación...\n'
+                )
+            )
+
+            // Igual que el sistema que sí funciona
+
+            setTimeout(
+                async () => {
+
+                    try {
+
+                        const code =
+                            await conn.requestPairingCode(
+                                phone
+                            )
+
+                        console.log('')
+
+                        console.log(
+                            chalk.green(
+                                '╭────────────────────────────╮'
+                            )
+                        )
+
+                        console.log(
+                            chalk.green(
+                                '│   CÓDIGO DE VINCULACIÓN    │'
+                            )
+                        )
+
+                        console.log(
+                            chalk.green(
+                                '╰────────────────────────────╯'
+                            )
+                        )
+
+                        console.log('')
+
+                        console.log(
+                            chalk.white.bold(
+                                code
+                            )
+                        )
+
+                        console.log('')
+
+                        console.log(
+                            chalk.gray(
+                                'WhatsApp → Dispositivos vinculados → Vincular con número de teléfono'
+                            )
+                        )
+
+                        console.log('')
+
+                    } catch (error) {
+
+                        console.log(
+                            chalk.red(
+                                '❌ Error generando código'
+                            )
+                        )
+
+                        console.error(
+                            error
+                        )
+                    }
+
+                },
+                3000
+            )
+        }
+
+        // Código QR
+
+        if (
+            !sessionExists &&
+            method === 'qr'
+        ) {
+
+            conn.ev.on(
+                'connection.update',
+                ({ qr }) => {
+
+                    if (
+                        qr
+                    ) {
+
+                        console.log(
+                            chalk.green(
+                                '\n📲 Escanea este QR:\n'
+                            )
+                        )
+
+                        qrcode.generate(
+                            qr,
+                            {
+                                small: true
+                            }
+                        )
+                    }
+                }
+            )
+        }
+
+        // Eventos de conexión
+
+        conn.ev.on(
+            'connection.update',
+            async update => {
+
+                const {
+                    connection,
+                    lastDisconnect
+                } = update
+
+                if (
+                    connection ===
+                    'open'
+                ) {
+
+                    reconnecting =
+                        false
+
+                    loginInProgress =
+                        false
+
+                    conn.isMainBot =
+                        true
+
+                    global.conn =
+                        conn
+
+                    console.log(
+                        chalk.green(
+                            '\n✅ BOT CONECTADO\n'
+                        )
+                    )
+
+                    console.log(
+                        chalk.cyan(
+                            `[EXCLUSIVE] Número: ${conn.user?.id || 'desconocido'}`
+                        )
+                    )
+
+                    console.log('')
+
+                    // Iniciar handler
+
+                    try {
+
+                        const {
+                            initHandler
+                        } =
+                            await import(
+                                './handler.js?update=' +
+                                Date.now()
+                            )
+
+                        await initHandler(
+                            conn
+                        )
+
+                    } catch (
+                        error
+                    ) {
+
+                        console.error(
+                            chalk.red(
+                                '[HANDLER] No se pudo iniciar:'
+                            ),
+                            error?.message ||
+                            error
+                        )
+                    }
+
+                    // Cargar SubBots
+
+                    try {
+
+                        const {
+                            startSub
+                        } =
+                            await import(
+                                './lib/resetsb.js?update=' +
+                                Date.now()
+                            )
+
+                        if (
+                            typeof startSub ===
+                            'function'
+                        ) {
+
+                            await startSub()
+                        }
+
+                    } catch (
+                        error
+                    ) {
+
+                        console.error(
+                            chalk.red(
+                                '[SUBBOT] No se pudieron cargar las sesiones:'
+                            ),
+                            error?.message ||
+                            error
+                        )
+                    }
+
+                    return
+                }
+
+                if (
+                    connection !==
+                    'close'
+                ) {
+                    return
+                }
+
+                const reason =
+                    lastDisconnect
+                        ?.error
+                        ?.output
+                        ?.statusCode
+
+                console.log(
+                    chalk.red(
+                        `❌ Conexión cerrada (${reason ?? 'desconocido'})`
+                    )
+                )
+
+                // Sesión cerrada por WhatsApp
+
+                if (
+                    reason ===
+                        DisconnectReason.loggedOut ||
+                    reason ===
+                        DisconnectReason.badSession ||
+                    reason === 401 ||
+                    reason === 403 ||
+                    reason === 405
+                ) {
+
+                    console.log(
+                        chalk.red(
+                            '[EXCLUSIVE] La sesión ya no es válida.'
+                        )
+                    )
+
+                    console.log(
+                        chalk.yellow(
+                            '[EXCLUSIVE] Elimina sessions/exclusive y vuelve a vincular.'
+                        )
+                    )
+
+                    return
+                }
+
+                // Evitar múltiples reconexiones
+
+                if (
+                    reconnecting
+                ) {
+                    return
+                }
+
+                reconnecting =
+                    true
+
+                console.log(
+                    chalk.cyan(
+                        '[EXCLUSIVE] Reconectando en 3 segundos...'
+                    )
+                )
+
+                setTimeout(
+                    async () => {
+
+                        try {
+
+                            reconnecting =
+                                false
+
+                            await startConnection(
+                                'saved'
+                            )
+
+                        } catch (
+                            error
+                        ) {
+
+                            console.error(
+                                chalk.red(
+                                    '[EXCLUSIVE] Error reconectando:'
+                                ),
+                                error?.message ||
+                                error
+                            )
+
+                            reconnecting =
+                                false
+                        }
+
+                    },
+                    3000
                 )
             }
         )
-    })
+
+        return conn
+
+    } catch (
+        error
+    ) {
+
+        loginInProgress =
+            false
+
+        console.error(
+            chalk.red(
+                '[EXCLUSIVE] Error creando conexión:'
+            ),
+            error?.message ||
+            error
+        )
+
+        throw error
+    }
 }
 
 // Menú de inicio
@@ -80,7 +528,8 @@ async function loginMenu() {
         return
     }
 
-    loginInProgress = true
+    loginInProgress =
+        true
 
     try {
 
@@ -90,8 +539,7 @@ async function loginMenu() {
                 'creds.json'
             )
 
-        // Si existe una sesión,
-        // no volver a pedir el número
+        // Sesión existente
 
         if (
             fs.existsSync(
@@ -99,8 +547,15 @@ async function loginMenu() {
             )
         ) {
 
-            loginInProgress =
-                false
+            console.log('')
+
+            console.log(
+                chalk.green(
+                    '🔐 Sesión detectada, conectando automáticamente...'
+                )
+            )
+
+            console.log('')
 
             await startConnection(
                 'saved'
@@ -132,15 +587,11 @@ async function loginMenu() {
         console.log('')
 
         console.log(
-            chalk.white(
-                '1. Código de vinculación'
-            )
+            '1. Código de vinculación'
         )
 
         console.log(
-            chalk.white(
-                '2. Código QR'
-            )
+            '2. Código QR'
         )
 
         console.log('')
@@ -154,9 +605,7 @@ async function loginMenu() {
 
             option =
                 await question(
-                    chalk.magenta(
-                        'Selecciona una opción: '
-                    )
+                    'Selecciona (1 o 2): '
                 )
 
             if (
@@ -172,526 +621,26 @@ async function loginMenu() {
             }
         }
 
-        if (
+        await startConnection(
             option === '1'
-        ) {
-
-            await startConnection(
-                'code'
-            )
-
-        } else {
-
-            await startConnection(
-                'qr'
-            )
-        }
-
-    } catch (error) {
-
-        console.error(
-            chalk.red(
-                '[MAIN] Error en el menú:'
-            ),
-            error?.message ||
-            error
+                ? 'code'
+                : 'qr'
         )
 
-        loginInProgress =
-            false
-    }
-}
-
-// Crear conexión
-
-async function startConnection(
-    method
-) {
-
-    try {
-
-        const {
-            state,
-            saveCreds
-        } =
-            await useMultiFileAuthState(
-                SESSION_DIR
-            )
-
-        const {
-            version
-        } =
-            await fetchLatestBaileysVersion()
-
-        conn =
-            makeWASocket({
-                auth: {
-                    creds:
-                        state.creds,
-
-                    keys:
-                        makeCacheableSignalKeyStore(
-                            state.keys,
-                            pino({
-                                level:
-                                    'silent'
-                            })
-                        )
-                },
-
-                logger:
-                    pino({
-                        level:
-                            'silent'
-                    }),
-
-                browser: [
-                    'Exclusive Bot',
-                    'Chrome',
-                    '1.0.0'
-                ],
-
-                version,
-
-                printQRInTerminal:
-                    method === 'qr',
-
-                markOnlineOnConnect:
-                    true,
-
-                generateHighQualityLinkPreview:
-                    true
-            })
-
-        // Identificar el Bot Principal
-
-        conn.isMainBot =
-            true
-
-        conn.isSubBot =
-            false
-
-        conn.sessionPath =
-            SESSION_DIR
-
-        conn.startTime =
-            Date.now()
-
-        global.conn =
-            conn
-
-        conn.ev.on(
-            'creds.update',
-            saveCreds
-        )
-
-        // Código de vinculación
-
-        if (
-            method === 'code' &&
-            !state.creds.registered
-        ) {
-
-            let phone =
-                await question(
-                    chalk.green(
-                        '\nIngresa el número de WhatsApp del Bot Principal:\n> '
-                    )
-                )
-
-            // Quitar +, espacios, guiones,
-            // paréntesis y cualquier otro carácter
-
-            phone =
-                String(phone)
-                    .replace(
-                        /\D/g,
-                        ''
-                    )
-
-            // Validar número internacional
-
-            if (
-                !/^\d{8,15}$/.test(
-                    phone
-                )
-            ) {
-
-                console.log('')
-
-                console.log(
-                    chalk.red(
-                        '❌ Número inválido.'
-                    )
-                )
-
-                console.log(
-                    chalk.gray(
-                        'Ejemplo: 12514487515'
-                    )
-                )
-
-                console.log('')
-
-                try {
-                    conn.ws?.close()
-                } catch {}
-
-                loginInProgress =
-                    false
-
-                return
-            }
-
-            console.log('')
-
-            console.log(
-                chalk.cyan(
-                    `[EXCLUSIVE] Solicitando código para +${phone}...`
-                )
-            )
-
-            try {
-
-                await new Promise(
-                    resolve =>
-                        setTimeout(
-                            resolve,
-                            1500
-                        )
-                )
-
-                let code =
-                    await conn.requestPairingCode(
-                        phone
-                    )
-
-                code =
-                    code
-                        ?.match(
-                            /.{1,4}/g
-                        )
-                        ?.join('-') ||
-                    code
-
-                console.log('')
-
-                console.log(
-                    chalk.magenta(
-                        '╭────────────────────────────╮'
-                    )
-                )
-
-                console.log(
-                    chalk.magenta(
-                        '│   CÓDIGO DE VINCULACIÓN    │'
-                    )
-                )
-
-                console.log(
-                    chalk.magenta(
-                        '╰────────────────────────────╯'
-                    )
-                )
-
-                console.log('')
-
-                console.log(
-                    chalk.white.bold(
-                        code
-                    )
-                )
-
-                console.log('')
-
-                console.log(
-                    chalk.gray(
-                        'WhatsApp → Dispositivos vinculados → Vincular con número de teléfono'
-                    )
-                )
-
-                console.log('')
-
-            } catch (error) {
-
-                console.error(
-                    chalk.red(
-                        '[EXCLUSIVE] No se pudo solicitar el código.'
-                    )
-                )
-
-                console.error(
-                    chalk.gray(
-                        error?.message ||
-                        error
-                    )
-                )
-
-                try {
-                    conn.ws?.close()
-                } catch {}
-
-                loginInProgress =
-                    false
-
-                return
-            }
-        }
-
-        // Eventos de conexión
-
-        conn.ev.on(
-            'connection.update',
-            async update => {
-
-                const {
-                    connection,
-                    lastDisconnect
-                } = update
-
-                // Conectado
-
-                if (
-                    connection ===
-                    'open'
-                ) {
-
-                    reconnecting =
-                        false
-
-                    loginInProgress =
-                        false
-
-                    conn.isMainBot =
-                        true
-
-                    conn.isSubBot =
-                        false
-
-                    global.conn =
-                        conn
-
-                    console.log('')
-
-                    console.log(
-                        chalk.green(
-                            '[EXCLUSIVE] Bot Principal conectado.'
-                        )
-                    )
-
-                    console.log(
-                        chalk.cyan(
-                            `[EXCLUSIVE] Número: ${conn.user?.id || 'desconocido'}`
-                        )
-                    )
-
-                    console.log('')
-
-                    // Cargar handler
-
-                    try {
-
-                        const {
-                            initHandler
-                        } =
-                            await import(
-                                './handler.js?update=' +
-                                Date.now()
-                            )
-
-                        await initHandler(
-                            conn
-                        )
-
-                    } catch (error) {
-
-                        console.error(
-                            chalk.red(
-                                '[HANDLER] No se pudo iniciar:'
-                            ),
-                            error?.message ||
-                            error
-                        )
-                    }
-
-                    // Cargar SubBots guardados
-
-                    try {
-
-                        const {
-                            startSub
-                        } =
-                            await import(
-                                './lib/resetsb.js?update=' +
-                                Date.now()
-                            )
-
-                        if (
-                            typeof startSub ===
-                            'function'
-                        ) {
-
-                            await startSub()
-                        }
-
-                    } catch (error) {
-
-                        console.error(
-                            chalk.red(
-                                '[SUBBOT] No se pudieron cargar las sesiones:'
-                            ),
-                            error?.message ||
-                            error
-                        )
-                    }
-
-                    return
-                }
-
-                // Si no se cerró,
-                // no hacer nada
-
-                if (
-                    connection !==
-                    'close'
-                ) {
-                    return
-                }
-
-                const statusCode =
-                    lastDisconnect
-                        ?.error
-                        ?.output
-                        ?.statusCode ??
-                    lastDisconnect
-                        ?.error
-                        ?.output
-                        ?.payload
-                        ?.statusCode
-
-                console.log('')
-
-                console.log(
-                    chalk.yellow(
-                        `[EXCLUSIVE] Conexión cerrada. Código: ${statusCode ?? 'desconocido'}`
-                    )
-                )
-
-                // Sesión cerrada definitivamente
-
-                if (
-                    statusCode ===
-                        DisconnectReason.loggedOut ||
-                    statusCode ===
-                        DisconnectReason.badSession ||
-                    statusCode ===
-                        401 ||
-                    statusCode ===
-                        403 ||
-                    statusCode ===
-                        405
-                ) {
-
-                    console.log(
-                        chalk.red(
-                            '[EXCLUSIVE] La sesión ya no es válida.'
-                        )
-                    )
-
-                    console.log(
-                        chalk.yellow(
-                            '[EXCLUSIVE] Elimina sessions/exclusive y vuelve a vincular.'
-                        )
-                    )
-
-                    return
-                }
-
-                // Evitar múltiples reconexiones
-
-                if (
-                    reconnecting
-                ) {
-                    return
-                }
-
-                reconnecting =
-                    true
-
-                console.log(
-                    chalk.cyan(
-                        '[EXCLUSIVE] Intentando reconectar en 3 segundos...'
-                    )
-                )
-
-                setTimeout(
-                    async () => {
-
-                        try {
-
-                            loginInProgress =
-                                false
-
-                            await startConnection(
-                                method
-                            )
-
-                        } catch (
-                            error
-                        ) {
-
-                            console.error(
-                                chalk.red(
-                                    '[EXCLUSIVE] Error reconectando:'
-                                ),
-                                error?.message ||
-                                error
-                            )
-
-                            reconnecting =
-                                false
-                        }
-
-                    },
-                    3000
-                )
-            }
-        )
-
-    } catch (error) {
+    } catch (
+        error
+    ) {
 
         loginInProgress =
             false
 
         console.error(
             chalk.red(
-                '[EXCLUSIVE] Error creando conexión:'
+                '[MAIN] Error en el inicio:'
             ),
             error?.message ||
             error
         )
-
-        if (
-            !reconnecting
-        ) {
-
-            reconnecting =
-                true
-
-            setTimeout(
-                async () => {
-
-                    reconnecting =
-                        false
-
-                    try {
-                        await loginMenu()
-                    } catch {}
-
-                },
-                3000
-            )
-        }
     }
 }
 
@@ -729,13 +678,11 @@ if (
                 process.send?.(
                     process.uptime()
                 )
-
-                return
             }
         }
     )
 }
 
-// Iniciar Bot Principal
+// Iniciar
 
 await loginMenu()
