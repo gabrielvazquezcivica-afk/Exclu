@@ -1,9 +1,15 @@
-import makeWASocket, {
+import * as baileys from '@whiskeysockets/baileys'
+
+const makeWASocket =
+    baileys.default ||
+    baileys.makeWASocket
+
+const {
     useMultiFileAuthState,
     DisconnectReason,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore
-} from '@whiskeysockets/baileys'
+} = baileys
 
 import fs from 'fs'
 import path from 'path'
