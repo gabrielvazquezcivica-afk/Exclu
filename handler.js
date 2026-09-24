@@ -1,80 +1,141 @@
 import fs from 'fs'
 import path from 'path'
 import chalk from 'chalk'
+import { pathToFileURL } from 'url'
 
 const PLUGINS_DIR = path.join(
     process.cwd(),
     'plugins'
 )
 
-global.plugins = global.plugins || new Map()
-global.commandQueue = global.commandQueue || Promise.resolve()
-global.exclusiveStartedAt = global.exclusiveStartedAt || Date.now()
+global.plugins =
+    global.plugins ||
+    new Map()
+
+global.exclusiveStartedAt =
+    global.exclusiveStartedAt ||
+    Date.now()
 
 // Obtener texto del mensaje
 
 function getText(m) {
-    if (!m?.message) return ''
 
-    const message = m.message
+    if (
+        !m?.message
+    ) {
+        return ''
+    }
 
-    if (typeof message.conversation === 'string')
+    const message =
+        m.message
+
+    if (
+        typeof message.conversation ===
+        'string'
+    ) {
         return message.conversation
+    }
 
-    if (typeof message.extendedTextMessage?.text === 'string')
+    if (
+        typeof message.extendedTextMessage?.text ===
+        'string'
+    ) {
         return message.extendedTextMessage.text
+    }
 
-    if (typeof message.imageMessage?.caption === 'string')
+    if (
+        typeof message.imageMessage?.caption ===
+        'string'
+    ) {
         return message.imageMessage.caption
+    }
 
-    if (typeof message.videoMessage?.caption === 'string')
+    if (
+        typeof message.videoMessage?.caption ===
+        'string'
+    ) {
         return message.videoMessage.caption
+    }
 
-    if (typeof message.documentMessage?.caption === 'string')
+    if (
+        typeof message.documentMessage?.caption ===
+        'string'
+    ) {
         return message.documentMessage.caption
+    }
 
     return ''
 }
 
-// Obtener número
+// Obtener número del JID
 
 function getNumber(jid) {
-    if (!jid) return ''
+
+    if (
+        !jid
+    ) {
+        return ''
+    }
 
     return String(jid)
         .split(':')[0]
         .split('@')[0]
-        .replace(/\D/g, '')
+        .replace(
+            /\D/g,
+            ''
+        )
 }
 
-// Comprobar si el mensaje pertenece al bot
+// Comprobar si el mensaje viene del propio bot
 
-function isBotMessage(sock, m) {
-    if (m?.key?.fromMe) return true
+function isBotMessage(
+    sock,
+    m
+) {
+
+    if (
+        m?.key?.fromMe
+    ) {
+        return true
+    }
 
     const sender =
         m?.key?.participant ||
         m?.participant ||
         m?.key?.remoteJid
 
-    const senderNumber = getNumber(sender)
+    const senderNumber =
+        getNumber(
+            sender
+        )
 
-    if (!senderNumber) return false
+    if (
+        !senderNumber
+    ) {
+        return false
+    }
 
     const botNumbers = [
         sock?.user?.id,
         sock?.user?.jid,
         sock?.user?.lid
     ]
-        .map(getNumber)
-        .filter(Boolean)
+        .map(
+            getNumber
+        )
+        .filter(
+            Boolean
+        )
 
-    return botNumbers.includes(senderNumber)
+    return botNumbers.includes(
+        senderNumber
+    )
 }
 
-// Comprobar si el mensaje es antiguo
+// Ignorar mensajes anteriores al arranque
 
 function isOldMessage(m) {
+
     const timestamp =
         Number(
             m?.messageTimestamp ||
@@ -82,39 +143,87 @@ function isOldMessage(m) {
             0
         )
 
-    if (!timestamp) return false
+    if (
+        !timestamp
+    ) {
+        return false
+    }
 
     const timestampMs =
-        timestamp > 100000000000
+        timestamp >
+        100000000000
             ? timestamp
             : timestamp * 1000
 
-    return timestampMs < global.exclusiveStartedAt
+    return (
+        timestampMs <
+        global.exclusiveStartedAt
+    )
 }
 
 // Comprobar comando
 
-function commandMatches(pluginCommand, command) {
-    if (typeof pluginCommand === 'string') {
-        return pluginCommand.toLowerCase() === command
+function commandMatches(
+    pluginCommand,
+    command
+) {
+
+    if (
+        typeof pluginCommand ===
+        'string'
+    ) {
+
+        return (
+            pluginCommand.toLowerCase() ===
+            command
+        )
     }
 
-    if (Array.isArray(pluginCommand)) {
-        return pluginCommand.some(cmd => {
-            if (typeof cmd === 'string') {
-                return cmd.toLowerCase() === command
-            }
+    if (
+        Array.isArray(
+            pluginCommand
+        )
+    ) {
 
-            if (cmd instanceof RegExp) {
-                return cmd.test(command)
-            }
+        return pluginCommand.some(
+            cmd => {
 
-            return false
-        })
+                if (
+                    typeof cmd ===
+                    'string'
+                ) {
+
+                    return (
+                        cmd.toLowerCase() ===
+                        command
+                    )
+                }
+
+                if (
+                    cmd instanceof RegExp
+                ) {
+
+                    cmd.lastIndex = 0
+
+                    return cmd.test(
+                        command
+                    )
+                }
+
+                return false
+            }
+        )
     }
 
-    if (pluginCommand instanceof RegExp) {
-        return pluginCommand.test(command)
+    if (
+        pluginCommand instanceof RegExp
+    ) {
+
+        pluginCommand.lastIndex = 0
+
+        return pluginCommand.test(
+            command
+        )
     }
 
     return false
@@ -123,36 +232,71 @@ function commandMatches(pluginCommand, command) {
 // Cargar plugins
 
 async function loadPlugins() {
-    if (!fs.existsSync(PLUGINS_DIR)) {
-        fs.mkdirSync(PLUGINS_DIR, {
-            recursive: true
-        })
+
+    if (
+        !fs.existsSync(
+            PLUGINS_DIR
+        )
+    ) {
+
+        fs.mkdirSync(
+            PLUGINS_DIR,
+            {
+                recursive: true
+            }
+        )
     }
 
-    const files = fs.readdirSync(PLUGINS_DIR)
-        .filter(file => file.endsWith('.js'))
-        .sort()
+    const files =
+        fs.readdirSync(
+            PLUGINS_DIR
+        )
+            .filter(
+                file =>
+                    file.endsWith(
+                        '.js'
+                    )
+            )
+            .sort()
 
     global.plugins.clear()
 
-    for (const file of files) {
-        try {
-            const filePath = path.join(
-                PLUGINS_DIR,
-                file
-            )
+    for (
+        const file of files
+    ) {
 
-            const imported = await import(
-                `${pathToFileURL(filePath)}?update=${Date.now()}`
-            )
+        try {
+
+            const filePath =
+                path.join(
+                    PLUGINS_DIR,
+                    file
+                )
+
+            const pluginUrl =
+                pathToFileURL(
+                    filePath
+                ).href
+
+            const imported =
+                await import(
+                    `${pluginUrl}?update=${Date.now()}`
+                )
 
             const plugin =
                 imported.default ||
                 imported.handler
 
-            if (!plugin) continue
+            if (
+                !plugin
+            ) {
+                continue
+            }
 
-            if (!plugin.command) {
+            if (
+                !plugin.command
+            ) {
+
                 console.log(
                     chalk.yellow(
                         `[PLUGIN] ${file} no tiene command`
@@ -167,14 +311,19 @@ async function loadPlugins() {
                 plugin
             )
 
-        } catch (error) {
+        } catch (
+            error
+        ) {
+
             console.error(
                 chalk.red(
                     `[PLUGIN] Error cargando ${file}`
                 )
             )
 
-            console.error(error)
+            console.error(
+                error
+            )
         }
     }
 
@@ -185,110 +334,13 @@ async function loadPlugins() {
     )
 }
 
-// Convertir ruta a URL
-
-function pathToFileURL(filePath) {
-    const absolutePath =
-        path.resolve(filePath)
-
-    return {
-        href:
-            'file://' +
-            absolutePath
-                .replace(/\\/g, '/')
-                .replace(/^\/?/, '/')
-    }
-}
-
-// Recargar plugin
-
-async function reloadPlugin(filename) {
-    if (!filename.endsWith('.js')) return
-
-    const filePath =
-        path.join(
-            PLUGINS_DIR,
-            filename
-        )
-
-    if (!fs.existsSync(filePath)) {
-        global.plugins.delete(filename)
-
-        console.log(
-            chalk.yellow(
-                `[PLUGIN] Eliminado: ${filename}`
-            )
-        )
-
-        return
-    }
-
-    try {
-        const imported = await import(
-            `${pathToFileURL(filePath)}?update=${Date.now()}`
-        )
-
-        const plugin =
-            imported.default ||
-            imported.handler
-
-        if (
-            !plugin ||
-            !plugin.command
-        ) {
-            return
-        }
-
-        global.plugins.set(
-            filename,
-            plugin
-        )
-
-        console.log(
-            chalk.cyan(
-                `[PLUGIN] Actualizado: ${filename}`
-            )
-        )
-
-    } catch (error) {
-        console.error(
-            chalk.red(
-                `[PLUGIN] Error actualizando ${filename}`
-            )
-        )
-
-        console.error(error)
-    }
-}
-
-// Vigilar carpeta de plugins
-
-function watchPlugins() {
-    let timer = null
-
-    fs.watch(
-        PLUGINS_DIR,
-        (eventType, filename) => {
-            if (
-                !filename ||
-                !filename.endsWith('.js')
-            ) {
-                return
-            }
-
-            clearTimeout(timer)
-
-            timer = setTimeout(
-                () => reloadPlugin(filename),
-                300
-            )
-        }
-    )
-}
-
 // Procesar mensaje
 
-async function processMessage(sock, m) {
+async function processMessage(
+    sock,
+    m
+) {
+
     if (
         !m?.key ||
         !m.message
@@ -296,60 +348,83 @@ async function processMessage(sock, m) {
         return
     }
 
-    // Ignorar mensajes del propio bot
-
     if (
-        isBotMessage(sock, m)
+        isBotMessage(
+            sock,
+            m
+        )
     ) {
         return
     }
 
-    // Ignorar mensajes anteriores al inicio
-
     if (
-        isOldMessage(m)
+        isOldMessage(
+            m
+        )
     ) {
         return
     }
 
     const text =
-        getText(m).trim()
+        getText(
+            m
+        ).trim()
 
-    if (!text) return
+    if (
+        !text
+    ) {
+        return
+    }
 
-    // Solo comandos con punto
-
-    if (!text.startsWith('.')) {
+    if (
+        !text.startsWith(
+            '.'
+        )
+    ) {
         return
     }
 
     const content =
-        text.slice(1).trim()
+        text
+            .slice(1)
+            .trim()
 
-    if (!content) return
+    if (
+        !content
+    ) {
+        return
+    }
 
     const parts =
-        content.split(/\s+/)
+        content.split(
+            /\s+/
+        )
 
     const command =
         (
-            parts.shift() || ''
+            parts.shift() ||
+            ''
         ).toLowerCase()
 
-    const args = parts
+    const args =
+        parts
 
-    m.text = text
-    m.chat = m.key.remoteJid
+    m.text =
+        text
+
+    m.chat =
+        m.key.remoteJid
+
     m.sender =
         m.key.participant ||
         m.participant ||
         m.key.remoteJid
 
     m.isGroup =
-        m.chat?.endsWith('@g.us') ||
+        m.chat?.endsWith(
+            '@g.us'
+        ) ||
         false
-
-    // Buscar plugin
 
     for (
         const [
@@ -357,9 +432,18 @@ async function processMessage(sock, m) {
             plugin
         ] of global.plugins
     ) {
-        if (!plugin) continue
 
-        if (plugin.disabled) continue
+        if (
+            !plugin
+        ) {
+            continue
+        }
+
+        if (
+            plugin.disabled
+        ) {
+            continue
+        }
 
         if (
             !commandMatches(
@@ -370,8 +454,11 @@ async function processMessage(sock, m) {
             continue
         }
 
-        m.plugin = filename
-        m.isCommand = true
+        m.plugin =
+            filename
+
+        m.isCommand =
+            true
 
         const extra = {
             command,
@@ -385,17 +472,20 @@ async function processMessage(sock, m) {
             message: m,
             chatUpdate: null,
             __dirname: PLUGINS_DIR,
-            __filename: path.join(
-                PLUGINS_DIR,
-                filename
-            )
+            __filename:
+                path.join(
+                    PLUGINS_DIR,
+                    filename
+                )
         }
 
         try {
+
             if (
                 typeof plugin.before ===
                 'function'
             ) {
+
                 const result =
                     await plugin.before(
                         sock,
@@ -403,7 +493,9 @@ async function processMessage(sock, m) {
                         extra
                     )
 
-                if (result) {
+                if (
+                    result
+                ) {
                     return
                 }
             }
@@ -412,16 +504,19 @@ async function processMessage(sock, m) {
                 typeof plugin.run ===
                 'function'
             ) {
+
                 await plugin.run(
                     sock,
                     m,
                     args,
                     extra
                 )
+
             } else if (
                 typeof plugin ===
                 'function'
             ) {
+
                 await plugin.call(
                     sock,
                     m,
@@ -429,28 +524,42 @@ async function processMessage(sock, m) {
                 )
             }
 
-        } catch (error) {
+        } catch (
+            error
+        ) {
+
             console.error(
                 chalk.red(
                     `[PLUGIN] ${filename}`
                 )
             )
 
-            console.error(error)
+            console.error(
+                error
+            )
 
         } finally {
+
             if (
                 typeof plugin.after ===
                 'function'
             ) {
+
                 try {
+
                     await plugin.after(
                         sock,
                         m,
                         extra
                     )
-                } catch (error) {
-                    console.error(error)
+
+                } catch (
+                    error
+                ) {
+
+                    console.error(
+                        error
+                    )
                 }
             }
         }
@@ -459,44 +568,56 @@ async function processMessage(sock, m) {
     }
 }
 
-// Handler principal
+// Procesar actualizaciones
 
-export async function handler(sock, update) {
+export async function handler(
+    sock,
+    update
+) {
+
     if (
         !update?.messages?.length
     ) {
         return
     }
 
-    for (
-        const m of update.messages
-    ) {
-        global.commandQueue =
-            global.commandQueue.then(
-                () =>
-                    processMessage(
+    // Procesar cada mensaje
+    // sin bloquear otros chats
+
+    await Promise.all(
+        update.messages.map(
+            async m => {
+
+                try {
+
+                    await processMessage(
                         sock,
                         m
                     )
-            ).catch(
-                error =>
+
+                } catch (
+                    error
+                ) {
+
                     console.error(
                         chalk.red(
                             '[HANDLER]'
                         ),
                         error
                     )
-            )
-
-        await global.commandQueue
-    }
+                }
+            }
+        )
+    )
 }
 
-// Inicializar handler
+// Iniciar handler
 
-export async function initHandler(sock) {
+export async function initHandler(
+    sock
+) {
+
     global.exclusiveStartedAt =
-        global.exclusiveStartedAt ||
         Date.now()
 
     await loadPlugins()
@@ -507,19 +628,33 @@ export async function initHandler(sock) {
         return
     }
 
-    sock.__exclusiveHandler = true
+    sock.__exclusiveHandler =
+        true
 
     sock.ev.on(
         'messages.upsert',
         async update => {
-            await handler(
-                sock,
-                update
-            )
+
+            try {
+
+                await handler(
+                    sock,
+                    update
+                )
+
+            } catch (
+                error
+            ) {
+
+                console.error(
+                    chalk.red(
+                        '[HANDLER]'
+                    ),
+                    error
+                )
+            }
         }
     )
-
-    watchPlugins()
 
     console.log(
         chalk.green(
