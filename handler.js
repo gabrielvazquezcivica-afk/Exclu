@@ -10,6 +10,9 @@ let pluginsLoading = null
 const initializedSockets =
     new WeakSet()
 
+const socketStartTimes =
+    new WeakMap()
+
 function getNumber(jid) {
     if (!jid || typeof jid !== 'string') {
         return ''
@@ -27,32 +30,79 @@ function isBotMessage(m) {
     )
 }
 
-function isOldMessage(m) {
-    if (!m?.messageTimestamp) {
-        return false
+function getMessageTimestamp(m) {
+    if (!m) {
+        return 0
     }
 
     const timestamp =
-        Number(m.messageTimestamp) * 1000
+        Number(
+            m.messageTimestamp
+        )
 
-    if (!Number.isFinite(timestamp)) {
+    if (
+        !Number.isFinite(timestamp) ||
+        timestamp <= 0
+    ) {
+        return 0
+    }
+
+    return timestamp * 1000
+}
+
+function isOldMessage(
+    sock,
+    m
+) {
+    const socketStartTime =
+        socketStartTimes.get(
+            sock
+        )
+
+    if (
+        !socketStartTime
+    ) {
         return false
     }
 
-    return Date.now() - timestamp > 60000
+    const messageTime =
+        getMessageTimestamp(
+            m
+        )
+
+    if (
+        !messageTime
+    ) {
+        return false
+    }
+
+    return (
+        messageTime <
+        socketStartTime
+    )
 }
 
-function commandMatches(command, used) {
+function commandMatches(
+    command,
+    used
+) {
     if (!command) {
         return false
     }
 
-    if (typeof command === 'string') {
-        return command.toLowerCase() ===
+    if (
+        typeof command ===
+        'string'
+    ) {
+        return (
+            command.toLowerCase() ===
             used.toLowerCase()
+        )
     }
 
-    if (Array.isArray(command)) {
+    if (
+        Array.isArray(command)
+    ) {
         return command.some(
             item =>
                 commandMatches(
@@ -62,9 +112,14 @@ function commandMatches(command, used) {
         )
     }
 
-    if (command instanceof RegExp) {
+    if (
+        command instanceof RegExp
+    ) {
         command.lastIndex = 0
-        return command.test(used)
+
+        return command.test(
+            used
+        )
     }
 
     return false
@@ -224,6 +279,7 @@ async function processMessage(
 
     if (
         isOldMessage(
+            sock,
             m
         )
     ) {
@@ -487,6 +543,11 @@ async function initHandler(
     ) {
         return handler
     }
+
+    socketStartTimes.set(
+        sock,
+        Date.now()
+    )
 
     initializedSockets.add(
         sock
