@@ -1,16 +1,16 @@
-import fs from 'fs'
-import path from 'path'
-import pino from 'pino'
-import chalk from 'chalk'
-import readline from 'readline'
-import qrcode from 'qrcode-terminal'
-
 import makeWASocket, {
     useMultiFileAuthState,
     DisconnectReason,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore
 } from '@whiskeysockets/baileys'
+
+import fs from 'fs'
+import path from 'path'
+import pino from 'pino'
+import chalk from 'chalk'
+import readline from 'readline'
+import qrcode from 'qrcode-terminal'
 
 const SESSION_DIR = path.join(
     process.cwd(),
@@ -45,7 +45,7 @@ let loginInProgress = false
 global.conn = null
 global.conns = global.conns || []
 
-// Consola principal
+// Consola
 
 const rl =
     readline.createInterface({
@@ -193,7 +193,8 @@ async function startConnection(
                 )
             )
 
-            // Igual que el sistema que sí funciona
+            // Método de vinculación
+            // tomado del código que sí funciona
 
             setTimeout(
                 async () => {
@@ -205,45 +206,15 @@ async function startConnection(
                                 phone
                             )
 
-                        console.log('')
-
                         console.log(
                             chalk.green(
-                                '╭────────────────────────────╮'
+                                `\n🔑 Código de vinculación: ${code}\n`
                             )
                         )
 
-                        console.log(
-                            chalk.green(
-                                '│   CÓDIGO DE VINCULACIÓN    │'
-                            )
-                        )
-
-                        console.log(
-                            chalk.green(
-                                '╰────────────────────────────╯'
-                            )
-                        )
-
-                        console.log('')
-
-                        console.log(
-                            chalk.white.bold(
-                                code
-                            )
-                        )
-
-                        console.log('')
-
-                        console.log(
-                            chalk.gray(
-                                'WhatsApp → Dispositivos vinculados → Vincular con número de teléfono'
-                            )
-                        )
-
-                        console.log('')
-
-                    } catch (error) {
+                    } catch (
+                        error
+                    ) {
 
                         console.log(
                             chalk.red(
@@ -261,7 +232,7 @@ async function startConnection(
             )
         }
 
-        // Código QR
+        // QR
 
         if (
             !sessionExists &&
@@ -317,6 +288,9 @@ async function startConnection(
 
                     conn.isMainBot =
                         true
+
+                    conn.isSubBot =
+                        false
 
                     global.conn =
                         conn
@@ -419,7 +393,7 @@ async function startConnection(
                     )
                 )
 
-                // Sesión cerrada por WhatsApp
+                // Sesión inválida
 
                 if (
                     reason ===
@@ -446,7 +420,7 @@ async function startConnection(
                     return
                 }
 
-                // Evitar múltiples reconexiones
+                // Reconexión
 
                 if (
                     reconnecting
@@ -518,7 +492,7 @@ async function startConnection(
     }
 }
 
-// Menú de inicio
+// Menú principal
 
 async function loginMenu() {
 
