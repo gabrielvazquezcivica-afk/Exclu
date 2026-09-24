@@ -82,185 +82,50 @@ function createSocket(
     state,
     version
 ) {
-    const sock =
-        makeWASocket({
-            version,
+    return makeWASocket({
+        version,
 
-            logger:
-                pino({
-                    level:
-                        'silent'
-                }),
+        logger:
+            pino({
+                level:
+                    'silent'
+            }),
 
-            auth: {
-                creds:
-                    state.creds,
+        auth: {
+            creds:
+                state.creds,
 
-                keys:
-                    makeCacheableSignalKeyStore(
-                        state.keys,
-                        pino({
-                            level:
-                                'silent'
-                        })
-                    )
-            },
-
-            browser: [
-                'Chrome',
-                'Chrome',
-                '120.0.0.0'
-            ],
-
-            printQRInTerminal:
-                false,
-
-            markOnlineOnConnect:
-                true,
-
-            syncFullHistory:
-                false,
-
-            connectTimeoutMs:
-                60000,
-
-            defaultQueryTimeoutMs:
-                60000
-        })
-
-    return sock
-}
-
-async function connectAfterPairing(
-    phone,
-    sessionPath
-) {
-    console.log(
-        `[SUBBOT] Reiniciando sesión de +${phone} después del pairing...`
-    )
-
-    const {
-        state,
-        saveCreds
-    } =
-        await useMultiFileAuthState(
-            sessionPath
-        )
-
-    const version =
-        await getVersion()
-
-    const sock =
-        createSocket(
-            state,
-            version
-        )
-
-    sock.isSubBot =
-        true
-
-    sock.isMainBot =
-        false
-
-    sock.isInit =
-        false
-
-    sock.subBotNumber =
-        phone
-
-    sock.subBotJid =
-        `${phone}@s.whatsapp.net`
-
-    sock.sessionPath =
-        sessionPath
-
-    sock.startTime =
-        Date.now()
-
-    sock.ev.on(
-        'creds.update',
-        saveCreds
-    )
-
-    global.conns =
-        global.conns || []
-
-    global.conns =
-        global.conns.filter(
-            item =>
-                item?.subBotNumber !==
-                phone
-        )
-
-    global.conns.push(
-        sock
-    )
-
-    sock.ev.on(
-        'connection.update',
-        update => {
-            const {
-                connection,
-                lastDisconnect
-            } = update
-
-            if (
-                connection ===
-                'open'
-            ) {
-                sock.isInit =
-                    true
-
-                console.log(
-                    `[SUBBOT] +${phone} conectado correctamente después del pairing.`
+            keys:
+                makeCacheableSignalKeyStore(
+                    state.keys,
+                    pino({
+                        level:
+                            'silent'
+                    })
                 )
+        },
 
-                return
-            }
+        browser: [
+            'Chrome',
+            'Chrome',
+            '120.0.0.0'
+        ],
 
-            if (
-                connection !==
-                'close'
-            ) {
-                return
-            }
+        printQRInTerminal:
+            false,
 
-            sock.isInit =
-                false
+        markOnlineOnConnect:
+            true,
 
-            const statusCode =
-                getStatusCode(
-                    lastDisconnect?.error
-                )
+        syncFullHistory:
+            false,
 
-            console.log(
-                `[SUBBOT] +${phone} desconectado después del pairing | Código: ${statusCode ?? 'desconocido'}`
-            )
+        connectTimeoutMs:
+            60000,
 
-            if (
-                statusCode ===
-                DisconnectReason.loggedOut
-            ) {
-                try {
-                    fs.rmSync(
-                        sessionPath,
-                        {
-                            recursive:
-                                true,
-                            force:
-                                true
-                        }
-                    )
-                } catch {}
-
-                console.log(
-                    `[SUBBOT] Sesión eliminada: +${phone}`
-                )
-            }
-        }
-    )
-
-    return sock
+        defaultQueryTimeoutMs:
+            60000
+    })
 }
 
 handler.run = async (
@@ -287,7 +152,8 @@ handler.run = async (
                     '❌ Debes escribir el número que quieres vincular.\n\nEjemplos:\n\n.code +52 12 3456 7890\n.code 521234567890\n.code +52-12-3456-7890'
             },
             {
-                quoted: m
+                quoted:
+                    m
             }
         )
 
@@ -307,7 +173,8 @@ handler.run = async (
                     '❌ El número no es válido.\n\nPuedes escribirlo con +, espacios, guiones o completamente limpio.'
             },
             {
-                quoted: m
+                quoted:
+                    m
             }
         )
 
@@ -362,7 +229,8 @@ handler.run = async (
                     `🟢 El número +${phone} ya está conectado como SubBot.`
             },
             {
-                quoted: m
+                quoted:
+                    m
             }
         )
 
@@ -381,7 +249,8 @@ handler.run = async (
                     `📁 Ya existe una sesión guardada para +${phone}.\n\nSi quieres volver a vincularla, elimina primero:\n\nsessions/subbots/${phone}`
             },
             {
-                quoted: m
+                quoted:
+                    m
             }
         )
 
@@ -456,6 +325,94 @@ handler.run = async (
             '[CODE] Socket creado correctamente.'
         )
 
+        socket.ev.on(
+            'connection.update',
+            async update => {
+                const {
+                    connection,
+                    lastDisconnect
+                } = update
+
+                if (
+                    connection !==
+                    'close'
+                ) {
+                    return
+                }
+
+                const statusCode =
+                    getStatusCode(
+                        lastDisconnect?.error
+                    )
+
+                if (
+                    statusCode !==
+                    DisconnectReason.restartRequired
+                ) {
+                    return
+                }
+
+                console.log(
+                    `[SUBBOT] +${phone} recibió 515.`
+                )
+
+                const index =
+                    global.conns.indexOf(
+                        socket
+                    )
+
+                if (
+                    index !== -1
+                ) {
+                    global.conns.splice(
+                        index,
+                        1
+                    )
+                }
+
+                try {
+                    socket.end(
+                        undefined
+                    )
+                } catch {}
+
+                try {
+                    socket.ws?.close()
+                } catch {}
+
+                console.log(
+                    `[SUBBOT] +${phone} pairing terminado. Entregando sesión a resetsb...`
+                )
+
+                await new Promise(
+                    resolve =>
+                        setTimeout(
+                            resolve,
+                            2000
+                        )
+                )
+
+                try {
+                    const {
+                        startSubBot
+                    } =
+                        await import(
+                            '../lib/resetsb.js'
+                        )
+
+                    await startSubBot(
+                        phone
+                    )
+                } catch (error) {
+                    console.error(
+                        `[SUBBOT] Error iniciando sesión definitiva +${phone}:`,
+                        error?.message ||
+                        error
+                    )
+                }
+            }
+        )
+
         await new Promise(
             resolve =>
                 setTimeout(
@@ -511,78 +468,6 @@ handler.run = async (
                         m
                 }
             )
-
-            socket.ev.on(
-                'connection.update',
-                async update => {
-                    const {
-                        connection,
-                        lastDisconnect
-                    } = update
-
-                    if (
-                        connection !==
-                        'close'
-                    ) {
-                        return
-                    }
-
-                    const statusCode =
-                        getStatusCode(
-                            lastDisconnect?.error
-                        )
-
-                    if (
-                        statusCode !==
-                        DisconnectReason.restartRequired
-                    ) {
-                        return
-                    }
-
-                    console.log(
-                        `[SUBBOT] +${phone} recibió 515.`
-                    )
-
-                    const index =
-                        global.conns.indexOf(
-                            socket
-                        )
-
-                    if (
-                        index !== -1
-                    ) {
-                        global.conns.splice(
-                            index,
-                            1
-                        )
-                    }
-
-                    try {
-                        socket.ws?.close()
-                    } catch {}
-
-                    await new Promise(
-                        resolve =>
-                            setTimeout(
-                                resolve,
-                                1500
-                            )
-                    )
-
-                    try {
-                        await connectAfterPairing(
-                            phone,
-                            sessionPath
-                        )
-                    } catch (error) {
-                        console.error(
-                            `[SUBBOT] Error reconectando +${phone}:`,
-                            error?.message ||
-                            error
-                        )
-                    }
-                }
-            )
         }
     } catch (error) {
         const statusCode =
@@ -614,6 +499,12 @@ handler.run = async (
                     1
                 )
             }
+
+            try {
+                socket.end(
+                    undefined
+                )
+            } catch {}
 
             try {
                 socket.ws?.close()
