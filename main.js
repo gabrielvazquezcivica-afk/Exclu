@@ -45,19 +45,23 @@ let loginInProgress = false
 global.conn = null
 global.conns = global.conns || []
 
-// Pregunta por consola
+// Preguntar por consola
 
 function question(text) {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    })
+    const rl =
+        readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        })
 
     return new Promise(resolve => {
+
         rl.question(
             text,
             answer => {
+
                 rl.close()
+
                 resolve(
                     answer.trim()
                 )
@@ -86,14 +90,22 @@ async function loginMenu() {
                 'creds.json'
             )
 
-        // Si ya existe una sesión, no pedir código otra vez
+        // Si existe una sesión,
+        // no volver a pedir el número
 
         if (
             fs.existsSync(
                 credsPath
             )
         ) {
-            loginInProgress = false
+
+            loginInProgress =
+                false
+
+            await startConnection(
+                'saved'
+            )
+
             return
         }
 
@@ -139,6 +151,7 @@ async function loginMenu() {
             option !== '1' &&
             option !== '2'
         ) {
+
             option =
                 await question(
                     chalk.magenta(
@@ -150,6 +163,7 @@ async function loginMenu() {
                 option !== '1' &&
                 option !== '2'
             ) {
+
                 console.log(
                     chalk.yellow(
                         'Selecciona 1 o 2.'
@@ -161,10 +175,13 @@ async function loginMenu() {
         if (
             option === '1'
         ) {
+
             await startConnection(
                 'code'
             )
+
         } else {
+
             await startConnection(
                 'qr'
             )
@@ -180,7 +197,8 @@ async function loginMenu() {
             error
         )
 
-        loginInProgress = false
+        loginInProgress =
+            false
     }
 }
 
@@ -267,7 +285,7 @@ async function startConnection(
             saveCreds
         )
 
-        // Solicitar código de vinculación
+        // Código de vinculación
 
         if (
             method === 'code' &&
@@ -281,17 +299,131 @@ async function startConnection(
                     )
                 )
 
-            phone =
-                phone.replace(
-                    /\D/g,
-                    ''
-                )
+            // Quitar +, espacios, guiones,
+            // paréntesis y cualquier otro carácter
 
-            if (!phone) {
+            phone =
+                String(phone)
+                    .replace(
+                        /\D/g,
+                        ''
+                    )
+
+            // Validar número internacional
+
+            if (
+                !/^\d{8,15}$/.test(
+                    phone
+                )
+            ) {
+
+                console.log('')
 
                 console.log(
                     chalk.red(
-                        'Número inválido.'
+                        '❌ Número inválido.'
+                    )
+                )
+
+                console.log(
+                    chalk.gray(
+                        'Ejemplo: 12514487515'
+                    )
+                )
+
+                console.log('')
+
+                try {
+                    conn.ws?.close()
+                } catch {}
+
+                loginInProgress =
+                    false
+
+                return
+            }
+
+            console.log('')
+
+            console.log(
+                chalk.cyan(
+                    `[EXCLUSIVE] Solicitando código para +${phone}...`
+                )
+            )
+
+            try {
+
+                await new Promise(
+                    resolve =>
+                        setTimeout(
+                            resolve,
+                            1500
+                        )
+                )
+
+                let code =
+                    await conn.requestPairingCode(
+                        phone
+                    )
+
+                code =
+                    code
+                        ?.match(
+                            /.{1,4}/g
+                        )
+                        ?.join('-') ||
+                    code
+
+                console.log('')
+
+                console.log(
+                    chalk.magenta(
+                        '╭────────────────────────────╮'
+                    )
+                )
+
+                console.log(
+                    chalk.magenta(
+                        '│   CÓDIGO DE VINCULACIÓN    │'
+                    )
+                )
+
+                console.log(
+                    chalk.magenta(
+                        '╰────────────────────────────╯'
+                    )
+                )
+
+                console.log('')
+
+                console.log(
+                    chalk.white.bold(
+                        code
+                    )
+                )
+
+                console.log('')
+
+                console.log(
+                    chalk.gray(
+                        'WhatsApp → Dispositivos vinculados → Vincular con número de teléfono'
+                    )
+                )
+
+                console.log('')
+
+            } catch (error) {
+
+                console.error(
+                    chalk.red(
+                        '[EXCLUSIVE] No se pudo solicitar el código.'
+                    )
+                )
+
+                console.error(
+                    chalk.gray(
+                        error?.message ||
+                        error
                     )
                 )
 
@@ -304,65 +436,6 @@ async function startConnection(
 
                 return
             }
-
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        1500
-                    )
-            )
-
-            let code =
-                await conn.requestPairingCode(
-                    phone
-                )
-
-            code =
-                code
-                    ?.match(
-                        /.{1,4}/g
-                    )
-                    ?.join('-') ||
-                code
-
-            console.log('')
-
-            console.log(
-                chalk.magenta(
-                    '╭────────────────────────────╮'
-                )
-            )
-
-            console.log(
-                chalk.magenta(
-                    '│   CÓDIGO DE VINCULACIÓN    │'
-                )
-            )
-
-            console.log(
-                chalk.magenta(
-                    '╰────────────────────────────╯'
-                )
-            )
-
-            console.log('')
-
-            console.log(
-                chalk.white.bold(
-                    code
-                )
-            )
-
-            console.log('')
-
-            console.log(
-                chalk.gray(
-                    'WhatsApp → Dispositivos vinculados → Vincular con número de teléfono'
-                )
-            )
-
-            console.log('')
         }
 
         // Eventos de conexión
@@ -375,6 +448,8 @@ async function startConnection(
                     connection,
                     lastDisconnect
                 } = update
+
+                // Conectado
 
                 if (
                     connection ===
@@ -389,6 +464,9 @@ async function startConnection(
 
                     conn.isMainBot =
                         true
+
+                    conn.isSubBot =
+                        false
 
                     global.conn =
                         conn
@@ -452,6 +530,7 @@ async function startConnection(
                             typeof startSub ===
                             'function'
                         ) {
+
                             await startSub()
                         }
 
@@ -468,6 +547,9 @@ async function startConnection(
 
                     return
                 }
+
+                // Si no se cerró,
+                // no hacer nada
 
                 if (
                     connection !==
@@ -613,7 +695,7 @@ async function startConnection(
     }
 }
 
-// Recibir mensajes desde index.js
+// Comunicación con index.js
 
 if (
     process.connected
@@ -654,6 +736,6 @@ if (
     )
 }
 
-// Iniciar
+// Iniciar Bot Principal
 
 await loginMenu()
