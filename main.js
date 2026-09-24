@@ -370,14 +370,17 @@ async function startConnection(
                             await startSub()
                         }
 
-                    } catch (
+                                        } catch (
                         error
                     ) {
                         console.error(
                             chalk.red(
                                 '[SUBBOT] No se pudieron cargar las sesiones:'
-                            ),
-                            error?.message ||
+                            )
+                        )
+
+                        console.error(
+                            error?.stack ||
                             error
                         )
                     }
