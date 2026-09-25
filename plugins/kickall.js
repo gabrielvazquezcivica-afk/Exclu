@@ -1,19 +1,105 @@
-const handler = async (
-    sock,
-    m,
-    args,
-    extra = {}
-) => {
-    await sock.sendMessage(
-        m.chat,
-        {
-            text:
-                `KICKALL RECIBIDO\n` +
-                `fromMe: ${m.key?.fromMe}\n` +
-                `m.fromMe: ${m.fromMe}\n` +
-                `isBot: ${extra.isBot}`
-        }
+const handler = async (sock, m, args, extra = {}) => {
+    if (!m.isGroup) return
+
+    if (!extra.isBot) return
+
+    const metadata = await sock.groupMetadata(m.chat)
+
+    const participants = metadata.participants || []
+
+    const cleanJid = jid => {
+        if (!jid) return ''
+
+        return jid
+            .split(':')[0]
+            .split('@')[0]
+    }
+
+    const botJid = sock.user?.id || ''
+    const botNumber = cleanJid(botJid)
+
+    const botParticipant = participants.find(
+        p => cleanJid(p.id) === botNumber
     )
+
+    const isBotAdmin =
+        botParticipant?.admin === 'admin' ||
+        botParticipant?.admin === 'superadmin'
+
+    if (!isBotAdmin) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                react: {
+                    text: '😂',
+                    key: m.key
+                }
+            }
+        )
+
+        return
+    }
+
+    const groupOwner = metadata.owner || ''
+    const ownerNumber = cleanJid(groupOwner)
+
+    const toKick = participants
+        .filter(p => {
+            if (!p?.id) return false
+
+            const number = cleanJid(p.id)
+
+            if (number === botNumber) {
+                return false
+            }
+
+            if (
+                ownerNumber &&
+                number === ownerNumber
+            ) {
+                return false
+            }
+
+            return true
+        })
+        .map(p => p.id)
+
+    if (!toKick.length) {
+        return
+    }
+
+    let removed = 0
+
+    for (const jid of toKick) {
+        try {
+            await sock.groupParticipantsUpdate(
+                m.chat,
+                [jid],
+                'remove'
+            )
+
+            removed++
+        } catch (error) {
+            console.error(
+                `[KICKALL] Error eliminando ${jid}:`,
+                error
+            )
+        }
+    }
+
+    if (removed > 0) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    `DOMADOS X EXCLUSIVE\n` +
+                    `> miembros domados: ${removed}`
+            },
+            {
+                quoted: m
+            }
+        )
+    }
 }
 
 handler.command = [
