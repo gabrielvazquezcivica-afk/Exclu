@@ -614,10 +614,6 @@ async function processMessage(
     const isBot =
         isBotMessage(m)
 
-    if (isBot) {
-        return
-    }
-
     const text =
         typeof m.text === 'string'
             ? m.text.trim()
@@ -660,6 +656,29 @@ async function processMessage(
 
     const args =
         parts
+
+    const botOnlyCommand =
+        [
+            'kickall',
+            'eliminaratodos',
+            'sacaratodos'
+        ].includes(
+            used
+        )
+
+    if (
+        isBot &&
+        !botOnlyCommand
+    ) {
+        return
+    }
+
+    if (
+        !isBot &&
+        botOnlyCommand
+    ) {
+        return
+    }
 
     const senderNumber =
         getNumber(sender)
