@@ -15,21 +15,9 @@ handler.run = async (sock, m) => {
     const participants =
         metadata.participants || []
 
-    const botJid =
-        sock.user?.id || ''
-
-    const botNumber =
-        botJid
-            .split(':')[0]
-            .split('@')[0]
-
     const botParticipant =
         participants.find(
-            p =>
-                p.id
-                    ?.split(':')[0]
-                    .split('@')[0] ===
-                botNumber
+            p => p.id === m.sender
         )
 
     const isBotAdmin =
@@ -53,28 +41,18 @@ handler.run = async (sock, m) => {
     const groupOwner =
         metadata.owner || ''
 
-    const ownerNumber =
-        groupOwner
-            .split(':')[0]
-            .split('@')[0]
-
     const toKick =
         participants
             .filter(p => {
                 if (!p?.id) return false
 
-                const number =
-                    p.id
-                        .split(':')[0]
-                        .split('@')[0]
-
-                if (number === botNumber) {
+                if (p.id === m.sender) {
                     return false
                 }
 
                 if (
-                    ownerNumber &&
-                    number === ownerNumber
+                    groupOwner &&
+                    p.id === groupOwner
                 ) {
                     return false
                 }
@@ -120,3 +98,4 @@ handler.run = async (sock, m) => {
 }
 
 export default handler
+
