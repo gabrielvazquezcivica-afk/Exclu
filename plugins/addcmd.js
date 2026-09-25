@@ -74,64 +74,22 @@ function getStickerMessage(
         return null
     }
 
-    let message =
-        quoted.message
-
-    if (!message) {
+    if (
+        quoted.mtype !==
+        'stickerMessage'
+    ) {
         return null
     }
 
     if (
-        message.stickerMessage
+        !quoted.message
     ) {
-        return message.stickerMessage
+        return null
     }
 
-    if (
-        message.ephemeralMessage
-            ?.message
-            ?.stickerMessage
-    ) {
-        return message
-            .ephemeralMessage
-            .message
-            .stickerMessage
-    }
-
-    if (
-        message.viewOnceMessage
-            ?.message
-            ?.stickerMessage
-    ) {
-        return message
-            .viewOnceMessage
-            .message
-            .stickerMessage
-    }
-
-    if (
-        message.viewOnceMessageV2
-            ?.message
-            ?.stickerMessage
-    ) {
-        return message
-            .viewOnceMessageV2
-            .message
-            .stickerMessage
-    }
-
-    if (
-        message.viewOnceMessageV2Extension
-            ?.message
-            ?.stickerMessage
-    ) {
-        return message
-            .viewOnceMessageV2Extension
-            .message
-            .stickerMessage
-    }
-
-    return null
+    return quoted.message[
+        quoted.mtype
+    ] || null
 }
 
 function getStickerHash(
@@ -169,7 +127,7 @@ async function downloadSticker(
 
     if (!stickerMessage) {
         throw new Error(
-            'No se encontró stickerMessage en m.quoted.message.'
+            'No se pudo obtener m.quoted.message[m.quoted.mtype].'
         )
     }
 
