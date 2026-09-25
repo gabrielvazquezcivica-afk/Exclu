@@ -163,6 +163,154 @@ async function startConnection(
             saveCreds
         )
 
+        conn.ev.on(
+            'messages.upsert',
+            async ({ messages }) => {
+                try {
+                    for (
+                        const msg of
+                        messages || []
+                    ) {
+                        if (
+                            !msg?.message
+                        ) {
+                            continue
+                        }
+
+                        const remoteJid =
+                            msg.key?.remoteJid ||
+                            ''
+
+                        if (
+                            !remoteJid.endsWith(
+                                '@g.us'
+                            )
+                        ) {
+                            continue
+                        }
+
+                        const message =
+                            msg.message
+
+                        const content =
+                            message.conversation ||
+                            message.extendedTextMessage?.text ||
+                            message.imageMessage?.caption ||
+                            message.videoMessage?.caption ||
+                            message.documentMessage?.caption ||
+                            ''
+
+                        const text =
+                            String(
+                                content
+                            ).trim()
+
+                        if (
+                            !text
+                        ) {
+                            continue
+                        }
+
+                        const prefixMatch =
+                            text.match(
+                                /^[.!#$%&/?]/
+                            )
+
+                        if (
+                            !prefixMatch
+                        ) {
+                            continue
+                        }
+
+                        const commandText =
+                            text
+                                .slice(
+                                    1
+                                )
+                                .trim()
+
+                        if (
+                            !commandText
+                        ) {
+                            continue
+                        }
+
+                        const senderName =
+                            msg.pushName ||
+                            'Desconocido'
+
+                        let groupName =
+                            'Grupo desconocido'
+
+                        try {
+                            const metadata =
+                                await conn.groupMetadata(
+                                    remoteJid
+                                )
+
+                            groupName =
+                                metadata.subject ||
+                                'Grupo desconocido'
+
+                        } catch {}
+
+                        console.log(
+                            chalk.cyan(
+                                '\n╭────────────────────────────'
+                            )
+                        )
+
+                        console.log(
+                            chalk.cyan(
+                                '│ 📨 COMANDO EJECUTADO'
+                            )
+                        )
+
+                        console.log(
+                            chalk.cyan(
+                                '├────────────────────────────'
+                            )
+                        )
+
+                        console.log(
+                            chalk.white(
+                                `│ Comando: ${text}`
+                            )
+                        )
+
+                        console.log(
+                            chalk.white(
+                                `│ Por: ${senderName}`
+                            )
+                        )
+
+                        console.log(
+                            chalk.white(
+                                `│ Grupo: ${groupName}`
+                            )
+                        )
+
+                        console.log(
+                            chalk.cyan(
+                                '╰────────────────────────────'
+                            )
+                        )
+                    }
+
+                } catch (
+                    error
+                ) {
+                    console.error(
+                        chalk.red(
+                            '[CONSOLE] Error registrando comando:'
+                        ),
+                        error?.message ||
+                        error
+                    )
+                }
+            }
+        )
+
         if (
             !sessionExists &&
             method === 'code'
@@ -370,7 +518,7 @@ async function startConnection(
                             await startSub()
                         }
 
-                                        } catch (
+                    } catch (
                         error
                     ) {
                         console.error(
