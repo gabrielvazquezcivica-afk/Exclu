@@ -1,14 +1,8 @@
 const handler = async (
     sock,
-    m,
-    args,
-    extra = {}
+    m
 ) => {
     if (!m.isGroup) {
-        return
-    }
-
-    if (!extra.isBot) {
         return
     }
 
@@ -28,11 +22,28 @@ const handler = async (
             .split(':')[0]
             .split('@')[0]
 
+    const botNumber =
+        normalize(botJid)
+
+    const senderNumber =
+        normalize(
+            m.sender ||
+            m.key?.participant ||
+            ''
+        )
+
+    if (
+        !m.key?.fromMe &&
+        senderNumber !== botNumber
+    ) {
+        return
+    }
+
     const botParticipant =
         participants.find(
             p =>
                 normalize(p.id) ===
-                normalize(botJid)
+                botNumber
         )
 
     const isBotAdmin =
@@ -59,7 +70,8 @@ const handler = async (
     const toKick =
         participants
             .filter(p => {
-                const id = p.id
+                const id =
+                    p.id
 
                 if (!id) {
                     return false
@@ -67,7 +79,7 @@ const handler = async (
 
                 if (
                     normalize(id) ===
-                    normalize(botJid)
+                    botNumber
                 ) {
                     return false
                 }
@@ -118,6 +130,5 @@ handler.command = [
 ]
 
 handler.group = true
-handler.bot = true
 
 export default handler
