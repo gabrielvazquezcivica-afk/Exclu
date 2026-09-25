@@ -102,10 +102,18 @@ function getStickerMessage(message) {
     }
 
     if (
+        message.msg?.stickerMessage
+    ) {
+        return message.msg.stickerMessage
+    }
+
+    if (
         message.msg &&
         (
+            message.msg.url ||
             message.msg.fileSha256 ||
-            message.msg.url
+            message.msg.directPath ||
+            message.msg.mediaKey
         )
     ) {
         return message.msg
@@ -115,6 +123,13 @@ function getStickerMessage(message) {
         message.stickerMessage
     ) {
         return message.stickerMessage
+    }
+
+    if (
+        message.mtype === 'stickerMessage' &&
+        message.msg
+    ) {
+        return message.msg
     }
 
     return null
@@ -130,7 +145,7 @@ async function downloadSticker(
 
     if (!stickerMessage) {
         throw new Error(
-            'No se encontró stickerMessage en el mensaje citado.'
+            'No se encontró el contenido del sticker.'
         )
     }
 
@@ -250,7 +265,7 @@ const handler = async (
         )
 
         await m.reply(
-            '❌ No pude descargar el archivo del sticker.\n\nRevisa la consola para ver el error.'
+            '❌ No pude descargar el archivo del sticker.'
         )
 
         return
