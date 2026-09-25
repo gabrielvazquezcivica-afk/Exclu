@@ -67,56 +67,18 @@ function saveDB(db) {
     )
 }
 
-function getStickerHash(message) {
+function getStickerMessage(
+    quoted
+) {
+    if (!quoted) {
+        return null
+    }
+
+    let message =
+        quoted.message
+
     if (!message) {
         return null
-    }
-
-    const hash =
-        message.fileSha256 ||
-        message.msg?.fileSha256 ||
-        message.message?.stickerMessage?.fileSha256
-
-    if (!hash) {
-        return null
-    }
-
-    try {
-        return Buffer
-            .from(hash)
-            .toString('base64')
-    } catch {
-        return null
-    }
-}
-
-function getStickerMessage(message) {
-    if (!message) {
-        return null
-    }
-
-    if (
-        message.message?.stickerMessage
-    ) {
-        return message.message.stickerMessage
-    }
-
-    if (
-        message.msg?.stickerMessage
-    ) {
-        return message.msg.stickerMessage
-    }
-
-    if (
-        message.msg &&
-        (
-            message.msg.url ||
-            message.msg.fileSha256 ||
-            message.msg.directPath ||
-            message.msg.mediaKey
-        )
-    ) {
-        return message.msg
     }
 
     if (
@@ -126,26 +88,88 @@ function getStickerMessage(message) {
     }
 
     if (
-        message.mtype === 'stickerMessage' &&
-        message.msg
+        message.ephemeralMessage
+            ?.message
+            ?.stickerMessage
     ) {
-        return message.msg
+        return message
+            .ephemeralMessage
+            .message
+            .stickerMessage
+    }
+
+    if (
+        message.viewOnceMessage
+            ?.message
+            ?.stickerMessage
+    ) {
+        return message
+            .viewOnceMessage
+            .message
+            .stickerMessage
+    }
+
+    if (
+        message.viewOnceMessageV2
+            ?.message
+            ?.stickerMessage
+    ) {
+        return message
+            .viewOnceMessageV2
+            .message
+            .stickerMessage
+    }
+
+    if (
+        message.viewOnceMessageV2Extension
+            ?.message
+            ?.stickerMessage
+    ) {
+        return message
+            .viewOnceMessageV2Extension
+            .message
+            .stickerMessage
     }
 
     return null
 }
 
-async function downloadSticker(
-    message
+function getStickerHash(
+    quoted
 ) {
     const stickerMessage =
         getStickerMessage(
-            message
+            quoted
+        )
+
+    if (
+        !stickerMessage?.fileSha256
+    ) {
+        return null
+    }
+
+    try {
+        return Buffer
+            .from(
+                stickerMessage.fileSha256
+            )
+            .toString('base64')
+    } catch {
+        return null
+    }
+}
+
+async function downloadSticker(
+    quoted
+) {
+    const stickerMessage =
+        getStickerMessage(
+            quoted
         )
 
     if (!stickerMessage) {
         throw new Error(
-            'No se encontró el contenido del sticker.'
+            'No se encontró stickerMessage en m.quoted.message.'
         )
     }
 
@@ -175,7 +199,7 @@ async function downloadSticker(
 
     if (!buffer.length) {
         throw new Error(
-            'La descarga del sticker devolvió un archivo vacío.'
+            'El sticker descargado está vacío.'
         )
     }
 
@@ -196,6 +220,17 @@ const handler = async (
         return
     }
 
+    if (
+        m.quoted.mtype !==
+        'stickerMessage'
+    ) {
+        await m.reply(
+            '❌ El mensaje citado no es un sticker.'
+        )
+
+        return
+    }
+
     const hash =
         getStickerHash(
             m.quoted
@@ -203,7 +238,7 @@ const handler = async (
 
     if (!hash) {
         await m.reply(
-            '❌ El mensaje citado no es un sticker válido.'
+            '❌ No se pudo obtener la identificación del sticker.'
         )
 
         return
