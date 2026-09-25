@@ -11,6 +11,11 @@ const dbPath = path.join(
     'stickers.json'
 )
 
+const stickersDir = path.join(
+    dbDir,
+    'stickers'
+)
+
 function loadDB() {
     try {
         if (!fs.existsSync(dbDir)) {
@@ -84,6 +89,69 @@ function getStickerHash(message) {
     }
 }
 
+function deleteStickerFile(
+    saved
+) {
+    if (!saved) {
+        return
+    }
+
+    const stickerFile =
+        saved.stickerFile
+
+    if (
+        stickerFile &&
+        typeof stickerFile === 'string' &&
+        fs.existsSync(stickerFile)
+    ) {
+        try {
+            fs.unlinkSync(
+                stickerFile
+            )
+
+            return
+        } catch (error) {
+            console.error(
+                '[STICKER CMD] Error eliminando archivo:',
+                error
+            )
+        }
+    }
+
+    const commandHash =
+        saved.hash
+
+    if (!commandHash) {
+        return
+    }
+
+    const fileName =
+        `${Buffer.from(commandHash).toString('hex')}.webp`
+
+    const filePath =
+        path.join(
+            stickersDir,
+            fileName
+        )
+
+    if (
+        fs.existsSync(
+            filePath
+        )
+    ) {
+        try {
+            fs.unlinkSync(
+                filePath
+            )
+        } catch (error) {
+            console.error(
+                '[STICKER CMD] Error eliminando archivo:',
+                error
+            )
+        }
+    }
+}
+
 const handler = async (
     sock,
     m
@@ -112,7 +180,10 @@ const handler = async (
     const sticker =
         loadDB()
 
-    if (!sticker[hash]) {
+    const saved =
+        sticker[hash]
+
+    if (!saved) {
         await m.reply(
             '❌ Este sticker no tiene ningún comando registrado.'
         )
@@ -121,7 +192,7 @@ const handler = async (
     }
 
     if (
-        sticker[hash].locked
+        saved.locked
     ) {
         await m.reply(
             '❌ Este comando está bloqueado y no puede eliminarse.'
@@ -131,14 +202,23 @@ const handler = async (
     }
 
     const command =
-        sticker[hash].command ||
-        sticker[hash].text ||
+        saved.command ||
+        saved.text ||
         ''
+
+    deleteStickerFile(
+        {
+            ...saved,
+            hash
+        }
+    )
 
     delete sticker[hash]
 
     try {
-        saveDB(sticker)
+        saveDB(
+            sticker
+        )
     } catch (error) {
         console.error(
             '[STICKER CMD] Error eliminando:',
@@ -146,7 +226,7 @@ const handler = async (
         )
 
         await m.reply(
-            '❌ No se pudo eliminar el comando.'
+            '❌ No se pudo actualizar la base de datos.'
         )
 
         return
