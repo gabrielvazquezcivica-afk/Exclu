@@ -149,6 +149,160 @@ function loadStickerCommands() {
     }
 }
 
+function normalizeStickerCommand(
+    value
+) {
+    if (
+        typeof value !== 'string'
+    ) {
+        return ''
+    }
+
+    return value.trim()
+}
+
+async function executePluginCommand(
+    sock,
+    m,
+    commandText,
+    isBot
+) {
+    if (
+        typeof commandText !== 'string'
+    ) {
+        return false
+    }
+
+    const text =
+        commandText.trim()
+
+    if (!text) {
+        return false
+    }
+
+    const prefixMatch =
+        text.match(
+            /^[.!#$%&/?]/
+        )
+
+    if (!prefixMatch) {
+        return false
+    }
+
+    const prefix =
+        prefixMatch[0]
+
+    const body =
+        text
+            .slice(
+                prefix.length
+            )
+            .trim()
+
+    if (!body) {
+        return false
+    }
+
+    const parts =
+        body.split(/\s+/)
+
+    const used =
+        parts
+            .shift()
+            .toLowerCase()
+
+    const args =
+        parts
+
+    const sender =
+        m.sender ||
+        m.key?.participant ||
+        m.participant ||
+        m.chat ||
+        ''
+
+    const senderNumber =
+        getNumber(sender)
+
+    const pluginList =
+        Array.from(
+            plugins.values()
+        )
+
+    for (
+        const plugin
+        of pluginList
+    ) {
+        if (!plugin) {
+            continue
+        }
+
+        if (
+            !commandMatches(
+                plugin.command,
+                used
+            )
+        ) {
+            continue
+        }
+
+        const extra = {
+            command: used,
+            prefix,
+            text,
+            body,
+            senderNumber,
+            isBot,
+            fromSticker: true,
+            stickerCommand: text
+        }
+
+        try {
+            if (
+                typeof plugin.before ===
+                'function'
+            ) {
+                await plugin.before(
+                    sock,
+                    m
+                )
+            }
+
+            if (
+                typeof plugin.run ===
+                'function'
+            ) {
+                await plugin.run(
+                    sock,
+                    m,
+                    args,
+                    extra
+                )
+            } else if (
+                typeof plugin ===
+                'function'
+            ) {
+                await plugin(
+                    sock,
+                    m,
+                    args,
+                    extra
+                )
+            }
+        } catch (error) {
+            console.error(
+                `[PLUGIN] Error ejecutando comando de sticker ${plugin.__file || used}:`
+            )
+
+            console.error(error)
+        }
+
+        return true
+    }
+
+    return false
+}
+
 async function processSticker(
     sock,
     m
@@ -167,48 +321,29 @@ async function processSticker(
     const stickerCommands =
         loadStickerCommands()
 
-    const command =
+    const saved =
         stickerCommands[hash]
+
+    if (!saved) {
+        return false
+    }
+
+    const command =
+        normalizeStickerCommand(
+            saved.command ||
+            saved.text
+        )
 
     if (!command) {
         return false
     }
 
-    if (
-        !command.text ||
-        typeof command.text !== 'string'
-    ) {
-        return false
-    }
-
-    const chat =
-        m.chat ||
-        m.key?.remoteJid ||
-        ''
-
-    if (!chat) {
-        return false
-    }
-
-    const mentions =
-        Array.isArray(
-            command.mentionedJid
-        )
-            ? command.mentionedJid
-            : []
-
-    await sock.sendMessage(
-        chat,
-        {
-            text: command.text,
-            mentions
-        },
-        {
-            quoted: m
-        }
+    return await executePluginCommand(
+        sock,
+        m,
+        command,
+        isBotMessage(m)
     )
-
-    return true
 }
 
 function commandMatches(
@@ -219,12 +354,18 @@ function commandMatches(
         return false
     }
 
-    if (typeof command === 'string') {
-        return command.toLowerCase() ===
+    if (
+        typeof command ===
+        'string'
+    ) {
+        return command
+            .toLowerCase() ===
             used.toLowerCase()
     }
 
-    if (Array.isArray(command)) {
+    if (
+        Array.isArray(command)
+    ) {
         return command.some(
             item =>
                 commandMatches(
@@ -234,7 +375,9 @@ function commandMatches(
         )
     }
 
-    if (command instanceof RegExp) {
+    if (
+        command instanceof RegExp
+    ) {
         command.lastIndex = 0
 
         return command.test(used)
@@ -280,8 +423,13 @@ async function loadPlugins() {
                             )
                     )
 
-            for (const file of files) {
-                if (plugins.has(file)) {
+            for (
+                const file
+                of files
+            ) {
+                if (
+                    plugins.has(file)
+                ) {
                     continue
                 }
 
@@ -421,9 +569,7 @@ async function processMessage(
         chat ||
         ''
 
-    if (
-        !m.reply
-    ) {
+    if (!m.reply) {
         Object.defineProperty(
             m,
             'reply',
@@ -455,12 +601,13 @@ async function processMessage(
         )
     }
 
-    if (
+    const stickerExecuted =
         await processSticker(
             sock,
             m
         )
-    ) {
+
+    if (stickerExecuted) {
         return
     }
 
@@ -545,7 +692,8 @@ async function processMessage(
             text,
             body,
             senderNumber,
-            isBot
+            isBot,
+            fromSticker: false
         }
 
         try {
