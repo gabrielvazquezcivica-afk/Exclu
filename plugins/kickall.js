@@ -118,5 +118,6 @@ handler.command = [
 ]
 
 handler.group = true
+handler.bot = true
 
 export default handler
