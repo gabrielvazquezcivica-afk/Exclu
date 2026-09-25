@@ -1,10 +1,13 @@
-const handler = async (sock, m, args, extra = {}) => {
-    if (!m.isGroup) return
+const handler = async (sock, m) => {
+    if (!m?.isGroup) return
 
-    if (!extra.isBot) return
+    const isBot =
+        m?.key?.fromMe === true ||
+        m?.fromMe === true
+
+    if (!isBot) return
 
     const metadata = await sock.groupMetadata(m.chat)
-
     const participants = metadata.participants || []
 
     const cleanJid = jid => {
@@ -15,11 +18,12 @@ const handler = async (sock, m, args, extra = {}) => {
             .split('@')[0]
     }
 
-    const botJid = sock.user?.id || ''
-    const botNumber = cleanJid(botJid)
+    const botNumber = cleanJid(
+        sock.user?.id
+    )
 
     const botParticipant = participants.find(
-        p => cleanJid(p.id) === botNumber
+        p => cleanJid(p?.id) === botNumber
     )
 
     const isBotAdmin =
@@ -40,8 +44,9 @@ const handler = async (sock, m, args, extra = {}) => {
         return
     }
 
-    const groupOwner = metadata.owner || ''
-    const ownerNumber = cleanJid(groupOwner)
+    const groupOwner = cleanJid(
+        metadata.owner
+    )
 
     const toKick = participants
         .filter(p => {
@@ -54,8 +59,8 @@ const handler = async (sock, m, args, extra = {}) => {
             }
 
             if (
-                ownerNumber &&
-                number === ownerNumber
+                groupOwner &&
+                number === groupOwner
             ) {
                 return false
             }
@@ -64,9 +69,7 @@ const handler = async (sock, m, args, extra = {}) => {
         })
         .map(p => p.id)
 
-    if (!toKick.length) {
-        return
-    }
+    if (!toKick.length) return
 
     let removed = 0
 
@@ -107,7 +110,5 @@ handler.command = [
     'eliminaratodos',
     'sacaratodos'
 ]
-
-handler.group = true
 
 export default handler
