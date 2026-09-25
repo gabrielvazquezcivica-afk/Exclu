@@ -581,12 +581,33 @@ handler.run = async (
             await conn.sendMessage(
                 m.chat,
                 {
+                    react: {
+                        text: '🔐',
+                        key: m.key
+                    }
+                }
+            )
+
+            await conn.sendMessage(
+                m.chat,
+                {
                     text:
-                        `🔐 *CÓDIGO DE VINCULACIÓN*\n\n📱 Número: +${phone}\n\nAbre WhatsApp en el número que vas a vincular y entra a:\n\n*Dispositivos vinculados → Vincular con número de teléfono*\n\n👇 *Tu código es:*\n\n*${code}*`
+                        `📱 *VINCULACIÓN DE SUBBOT*\n\n` +
+                        `Abre WhatsApp en el número *+${phone}* y entra a:\n\n` +
+                        `*Dispositivos vinculados → Vincular con número de teléfono*\n\n` +
+                        `Después introduce el código que te enviaré en el siguiente mensaje.`
                 },
                 {
                     quoted:
                         m
+                }
+            )
+
+            await conn.sendMessage(
+                m.chat,
+                {
+                    text:
+                        `${code}`
                 }
             )
         }
