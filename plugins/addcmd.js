@@ -1,6 +1,5 @@
 import fs from 'fs'
 import path from 'path'
-import { downloadContentFromMessage } from '@whiskeysockets/baileys'
 
 const dbDir = path.join(
     process.cwd(),
@@ -10,11 +9,6 @@ const dbDir = path.join(
 const dbPath = path.join(
     dbDir,
     'stickers.json'
-)
-
-const stickersDir = path.join(
-    dbDir,
-    'stickers'
 )
 
 function loadDB() {
@@ -56,6 +50,15 @@ function loadDB() {
 }
 
 function saveDB(db) {
+    if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(
+            dbDir,
+            {
+                recursive: true
+            }
+        )
+    }
+
     fs.writeFileSync(
         dbPath,
         JSON.stringify(
@@ -67,101 +70,27 @@ function saveDB(db) {
     )
 }
 
-function getStickerMessage(
-    quoted
-) {
-    if (!quoted) {
+function getStickerHash(message) {
+    if (!message) {
         return null
     }
 
-    if (
-        quoted.mtype !==
-        'stickerMessage'
-    ) {
-        return null
-    }
+    const hash =
+        message.fileSha256 ||
+        message.msg?.fileSha256 ||
+        message.message?.stickerMessage?.fileSha256
 
-    if (
-        !quoted.message
-    ) {
-        return null
-    }
-
-    return quoted.message[
-        quoted.mtype
-    ] || null
-}
-
-function getStickerHash(
-    quoted
-) {
-    const stickerMessage =
-        getStickerMessage(
-            quoted
-        )
-
-    if (
-        !stickerMessage?.fileSha256
-    ) {
+    if (!hash) {
         return null
     }
 
     try {
         return Buffer
-            .from(
-                stickerMessage.fileSha256
-            )
+            .from(hash)
             .toString('base64')
     } catch {
         return null
     }
-}
-
-async function downloadSticker(
-    quoted
-) {
-    const stickerMessage =
-        getStickerMessage(
-            quoted
-        )
-
-    if (!stickerMessage) {
-        throw new Error(
-            'No se pudo obtener m.quoted.message[m.quoted.mtype].'
-        )
-    }
-
-    const stream =
-        await downloadContentFromMessage(
-            stickerMessage,
-            'sticker'
-        )
-
-    const chunks = []
-
-    for await (
-        const chunk
-        of stream
-    ) {
-        chunks.push(
-            Buffer.from(
-                chunk
-            )
-        )
-    }
-
-    const buffer =
-        Buffer.concat(
-            chunks
-        )
-
-    if (!buffer.length) {
-        throw new Error(
-            'El sticker descargado está vacío.'
-        )
-    }
-
-    return buffer
 }
 
 const handler = async (
@@ -178,17 +107,6 @@ const handler = async (
         return
     }
 
-    if (
-        m.quoted.mtype !==
-        'stickerMessage'
-    ) {
-        await m.reply(
-            '❌ El mensaje citado no es un sticker.'
-        )
-
-        return
-    }
-
     const hash =
         getStickerHash(
             m.quoted
@@ -196,7 +114,7 @@ const handler = async (
 
     if (!hash) {
         await m.reply(
-            '❌ No se pudo obtener la identificación del sticker.'
+            '❌ El mensaje citado no es un sticker válido.'
         )
 
         return
@@ -240,83 +158,36 @@ const handler = async (
         return
     }
 
-    await m.reply(
-        '⏳ Guardando sticker...'
-    )
-
-    let stickerBuffer
+    sticker[hash] = {
+        command,
+        creator:
+            m.sender ||
+            m.key?.participant ||
+            '',
+        at: Date.now(),
+        locked: false
+    }
 
     try {
-        stickerBuffer =
-            await downloadSticker(
-                m.quoted
-            )
+        saveDB(
+            sticker
+        )
     } catch (error) {
         console.error(
-            '[STICKER CMD] Error descargando sticker:',
+            '[STICKER CMD] Error guardando:',
             error
         )
 
         await m.reply(
-            '❌ No pude descargar el archivo del sticker.'
+            '❌ No se pudo guardar el comando.'
         )
 
         return
     }
 
-    try {
-        if (!fs.existsSync(stickersDir)) {
-            fs.mkdirSync(
-                stickersDir,
-                {
-                    recursive: true
-                }
-            )
-        }
-
-        const fileName =
-            `${Buffer.from(hash).toString('hex')}.webp`
-
-        const stickerPath =
-            path.join(
-                stickersDir,
-                fileName
-            )
-
-        fs.writeFileSync(
-            stickerPath,
-            stickerBuffer
-        )
-
-        sticker[hash] = {
-            command,
-            creator:
-                m.sender ||
-                m.key?.participant ||
-                '',
-            at: Date.now(),
-            locked: false,
-            stickerFile:
-                stickerPath
-        }
-
-        saveDB(
-            sticker
-        )
-
-        await m.reply(
-            `✅ Comando agregado correctamente.\n\n🎯 Comando: ${command}\n🌎 Disponible globalmente en el bot principal y SubBots.`
-        )
-    } catch (error) {
-        console.error(
-            '[STICKER CMD] Error guardando sticker:',
-            error
-        )
-
-        await m.reply(
-            '❌ No se pudo guardar el archivo del sticker.'
-        )
-    }
+    await m.reply(
+        `✅ Comando agregado correctamente.\n\n🎯 Comando: ${command}\n🌎 Disponible globalmente en el bot principal y SubBots.`
+    )
 }
 
 handler.command = [
