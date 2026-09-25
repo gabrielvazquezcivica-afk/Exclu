@@ -17,32 +17,23 @@ const handler = async (
     const botJid =
         sock.user?.id || ''
 
-    const normalize = jid =>
-        (jid || '')
+    const cleanJid = jid => {
+        if (!jid) {
+            return ''
+        }
+
+        return jid
             .split(':')[0]
             .split('@')[0]
+    }
 
     const botNumber =
-        normalize(botJid)
-
-    const senderNumber =
-        normalize(
-            m.sender ||
-            m.key?.participant ||
-            ''
-        )
-
-    if (
-        !m.key?.fromMe &&
-        senderNumber !== botNumber
-    ) {
-        return
-    }
+        cleanJid(botJid)
 
     const botParticipant =
         participants.find(
             p =>
-                normalize(p.id) ===
+                cleanJid(p.id) ===
                 botNumber
         )
 
@@ -67,6 +58,9 @@ const handler = async (
     const groupOwner =
         metadata.owner || ''
 
+    const ownerNumber =
+        cleanJid(groupOwner)
+
     const toKick =
         participants
             .filter(p => {
@@ -77,17 +71,20 @@ const handler = async (
                     return false
                 }
 
+                const number =
+                    cleanJid(id)
+
                 if (
-                    normalize(id) ===
+                    number ===
                     botNumber
                 ) {
                     return false
                 }
 
                 if (
-                    groupOwner &&
-                    normalize(id) ===
-                        normalize(groupOwner)
+                    ownerNumber &&
+                    number ===
+                        ownerNumber
                 ) {
                     return false
                 }
@@ -100,25 +97,36 @@ const handler = async (
         return
     }
 
-    try {
-        await sock.groupParticipantsUpdate(
-            m.chat,
-            toKick,
-            'remove'
-        )
+    let removed = 0
 
+    for (
+        const jid
+        of toKick
+    ) {
+        try {
+            await sock.groupParticipantsUpdate(
+                m.chat,
+                [jid],
+                'remove'
+            )
+
+            removed++
+        } catch (error) {
+            console.error(
+                `[KICKALL] Error eliminando ${jid}:`,
+                error
+            )
+        }
+    }
+
+    if (removed > 0) {
         await sock.sendMessage(
             m.chat,
             {
                 text:
                     `DOMADOS X EXCLUSIVE\n` +
-                    `> miembros domados: ${toKick.length}`
+                    `> miembros domados: ${removed}`
             }
-        )
-    } catch (error) {
-        console.error(
-            '[KICKALL]',
-            error
         )
     }
 }
