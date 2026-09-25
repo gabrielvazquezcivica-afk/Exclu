@@ -1,14 +1,25 @@
 import fs from 'fs'
 import path from 'path'
-import config from '../config.js'
 
-const dbDir = path.join(process.cwd(), 'database')
-const dbPath = path.join(dbDir, 'stickers.json')
+const dbDir = path.join(
+    process.cwd(),
+    'database'
+)
+
+const dbPath = path.join(
+    dbDir,
+    'stickers.json'
+)
 
 function loadDB() {
     try {
         if (!fs.existsSync(dbDir)) {
-            fs.mkdirSync(dbDir, { recursive: true })
+            fs.mkdirSync(
+                dbDir,
+                {
+                    recursive: true
+                }
+            )
         }
 
         if (!fs.existsSync(dbPath)) {
@@ -19,15 +30,18 @@ function loadDB() {
             )
         }
 
-        const data = fs.readFileSync(
-            dbPath,
-            'utf8'
-        )
+        const data =
+            fs.readFileSync(
+                dbPath,
+                'utf8'
+            )
 
-        return JSON.parse(data || '{}')
+        return JSON.parse(
+            data || '{}'
+        )
     } catch (error) {
         console.error(
-            '[STICKER CMD] Error leyendo database/stickers.json:',
+            '[STICKER CMD] Error leyendo stickers:',
             error
         )
 
@@ -36,64 +50,23 @@ function loadDB() {
 }
 
 function saveDB(db) {
-    try {
-        if (!fs.existsSync(dbDir)) {
-            fs.mkdirSync(dbDir, { recursive: true })
-        }
-
-        fs.writeFileSync(
-            dbPath,
-            JSON.stringify(
-                db,
-                null,
-                2
-            ),
-            'utf8'
-        )
-    } catch (error) {
-        console.error(
-            '[STICKER CMD] Error guardando database/stickers.json:',
-            error
-        )
-
-        throw new Error(
-            'No se pudo guardar el comando del sticker.'
+    if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(
+            dbDir,
+            {
+                recursive: true
+            }
         )
     }
-}
 
-function getNumber(jid) {
-    if (!jid || typeof jid !== 'string') {
-        return ''
-    }
-
-    return jid
-        .split('@')[0]
-        .replace(/\D/g, '')
-}
-
-function isOwner(jid) {
-    const number = getNumber(jid)
-
-    const owners = Array.isArray(config.owner)
-        ? config.owner
-        : []
-
-    const ownerLids = Array.isArray(config.ownerLid)
-        ? config.ownerLid
-        : []
-
-    return (
-        owners
-            .filter(Boolean)
-            .map(String)
-            .includes(number) ||
-        ownerLids
-            .filter(Boolean)
-            .map(String)
-            .includes(
-                String(jid)
-            )
+    fs.writeFileSync(
+        dbPath,
+        JSON.stringify(
+            db,
+            null,
+            2
+        ),
+        'utf8'
     )
 }
 
@@ -126,63 +99,89 @@ const handler = async (
     args,
     extra = {}
 ) => {
-    if (!isOwner(m.sender)) {
+    if (!m.quoted) {
+        await m.reply(
+            '❌ Por favor, responde a un sticker para agregar el comando.'
+        )
+
         return
     }
 
-    if (!m.quoted) {
-        throw new Error(
-            'Por favor, responde a un sticker para agregar el comando.'
-        )
-    }
-
     const hash =
-        getStickerHash(m.quoted)
+        getStickerHash(
+            m.quoted
+        )
 
     if (!hash) {
-        throw new Error(
-            'El mensaje citado no es un sticker válido.'
+        await m.reply(
+            '❌ El mensaje citado no es un sticker válido.'
         )
+
+        return
     }
 
     const text =
-        args
-            ?.join(' ')
-            ?.trim() || ''
+        Array.isArray(args)
+            ? args.join(' ').trim()
+            : ''
 
     if (!text) {
-        throw new Error(
-            `Falta el texto para el comando.\n\nEjemplo:\n${extra.prefix || '.'}${extra.command || 'addcmd'} hola`
+        const prefix =
+            extra.prefix || '.'
+
+        const command =
+            extra.command || 'addcmd'
+
+        await m.reply(
+            `❌ Falta el texto para el comando.\n\nUso:\n${prefix}${command} <texto>\n\nEjemplo:\n${prefix}${command} hola`
         )
+
+        return
     }
 
-    const sticker = loadDB()
+    const sticker =
+        loadDB()
 
     if (
         sticker[hash] &&
         sticker[hash].locked
     ) {
-        throw new Error(
-            'No puedes modificar este comando, está bloqueado.'
+        await m.reply(
+            '❌ No puedes modificar este comando, está bloqueado.'
         )
+
+        return
     }
 
     sticker[hash] = {
         text,
         mentionedJid:
-            Array.isArray(m.mentionedJid)
+            Array.isArray(
+                m.mentionedJid
+            )
                 ? m.mentionedJid
                 : [],
         creator:
-            m.sender || '',
-        at: Date.now(),
+            m.sender ||
+            m.key?.participant ||
+            '',
+        at:
+            Date.now(),
         locked: false
     }
 
-    saveDB(sticker)
+    try {
+        saveDB(sticker)
+    } catch (error) {
+        await m.reply(
+            '❌ No se pudo guardar el comando del sticker.'
+        )
+
+        return
+    }
 
     await m.reply(
-        'Comando agregado al sticker correctamente.'
+        '✅ Comando agregado al sticker correctamente.\n\n🌎 Este sticker funcionará globalmente en todos los grupos donde esté el bot o un SubBot.'
     )
 }
 
