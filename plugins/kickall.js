@@ -6,12 +6,8 @@ handler.command = [
     'sacaratodos'
 ]
 
-handler.run = async (sock, m, args, extra = {}) => {
+handler.run = async (sock, m) => {
     if (!m.isGroup) return
-
-    if (!extra.isBot) {
-        return
-    }
 
     const metadata =
         await sock.groupMetadata(m.chat)
@@ -22,21 +18,17 @@ handler.run = async (sock, m, args, extra = {}) => {
     const botJid =
         sock.user?.id || ''
 
-    const clean = jid => {
-        if (!jid) return ''
-
-        return jid
+    const botNumber =
+        botJid
             .split(':')[0]
             .split('@')[0]
-    }
-
-    const botNumber =
-        clean(botJid)
 
     const botParticipant =
         participants.find(
             p =>
-                clean(p?.id) ===
+                p.id
+                    ?.split(':')[0]
+                    .split('@')[0] ===
                 botNumber
         )
 
@@ -59,33 +51,37 @@ handler.run = async (sock, m, args, extra = {}) => {
     }
 
     const groupOwner =
-        clean(metadata.owner)
+        metadata.owner || ''
 
-    const toKick = []
+    const ownerNumber =
+        groupOwner
+            .split(':')[0]
+            .split('@')[0]
 
-    for (const participant of participants) {
-        if (!participant?.id) {
-            continue
-        }
+    const toKick =
+        participants
+            .filter(p => {
+                if (!p?.id) return false
 
-        const id =
-            clean(participant.id)
+                const number =
+                    p.id
+                        .split(':')[0]
+                        .split('@')[0]
 
-        if (id === botNumber) {
-            continue
-        }
+                if (number === botNumber) {
+                    return false
+                }
 
-        if (
-            groupOwner &&
-            id === groupOwner
-        ) {
-            continue
-        }
+                if (
+                    ownerNumber &&
+                    number === ownerNumber
+                ) {
+                    return false
+                }
 
-        toKick.push(
-            participant.id
-        )
-    }
+                return true
+            })
+            .map(p => p.id)
 
     if (!toKick.length) {
         return
