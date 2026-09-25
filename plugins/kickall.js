@@ -1,8 +1,14 @@
 const handler = async (
     sock,
-    m
+    m,
+    args,
+    extra = {}
 ) => {
     if (!m.isGroup) {
+        return
+    }
+
+    if (!extra.isBot) {
         return
     }
 
@@ -17,23 +23,10 @@ const handler = async (
     const botJid =
         sock.user?.id || ''
 
-    const sender =
-        m.sender || ''
-
-    const normalize =
-        jid =>
-            (jid || '')
-                .split(':')[0]
-                .split('@')[0]
-
-    const isBot =
-        m.fromMe ||
-        normalize(sender) ===
-            normalize(botJid)
-
-    if (!isBot) {
-        return
-    }
+    const normalize = jid =>
+        (jid || '')
+            .split(':')[0]
+            .split('@')[0]
 
     const botParticipant =
         participants.find(
