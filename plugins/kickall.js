@@ -243,5 +243,3 @@ handler.command = [
 ]
 
 export default handler
-
-Ojo: hay una parte que podemos simplificar después de probarlo: la identificación del bot en "participants". Primero prueba este archivo reiniciando el bot/SubBot.
