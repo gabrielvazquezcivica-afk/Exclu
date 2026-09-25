@@ -4,19 +4,13 @@ import { pathToFileURL } from 'url'
 import { smsg } from './lib/simple.js'
 
 const plugins = new Map()
-
 let pluginsLoading = null
 
-const initializedSockets =
-    new WeakSet()
-
-const messageCutoffs =
-    new WeakMap()
+const initializedSockets = new WeakSet()
+const messageCutoffs = new WeakMap()
 
 function getNumber(jid) {
-    if (!jid || typeof jid !== 'string') {
-        return ''
-    }
+    if (!jid || typeof jid !== 'string') return ''
 
     return jid
         .split('@')[0]
@@ -35,15 +29,11 @@ function getMessageTimestamp(m) {
         m?.messageTimestamp ??
         m?.key?.messageTimestamp
 
-    if (
-        timestamp === undefined ||
-        timestamp === null
-    ) {
+    if (timestamp === undefined || timestamp === null) {
         return 0
     }
 
-    const number =
-        Number(timestamp)
+    const number = Number(timestamp)
 
     if (!Number.isFinite(number)) {
         return 0
@@ -55,55 +45,37 @@ function getMessageTimestamp(m) {
 }
 
 function isOldMessage(m) {
-    const timestamp =
-        getMessageTimestamp(m)
+    const timestamp = getMessageTimestamp(m)
 
-    if (!timestamp) {
-        return false
-    }
+    if (!timestamp) return false
 
     return Date.now() - timestamp > 60000
 }
 
-function isBeforeHandlerStart(
-    sock,
-    m
-) {
-    const cutoff =
-        messageCutoffs.get(sock)
+function isBeforeHandlerStart(sock, m) {
+    const cutoff = messageCutoffs.get(sock)
 
-    if (!cutoff) {
-        return false
-    }
+    if (!cutoff) return false
 
-    const timestamp =
-        getMessageTimestamp(m)
+    const timestamp = getMessageTimestamp(m)
 
-    if (!timestamp) {
-        return false
-    }
+    if (!timestamp) return false
 
     return timestamp < cutoff
 }
 
 function getStickerHash(message) {
-    if (!message) {
-        return null
-    }
+    if (!message) return null
 
     const hash =
         message.fileSha256 ||
         message.msg?.fileSha256 ||
         message.message?.stickerMessage?.fileSha256
 
-    if (!hash) {
-        return null
-    }
+    if (!hash) return null
 
     try {
-        return Buffer
-            .from(hash)
-            .toString('base64')
+        return Buffer.from(hash).toString('base64')
     } catch {
         return null
     }
@@ -118,27 +90,23 @@ function isStickerMessage(m) {
 }
 
 function loadStickerCommands() {
-    const dbPath =
-        path.join(
-            process.cwd(),
-            'database',
-            'stickers.json'
-        )
+    const dbPath = path.join(
+        process.cwd(),
+        'database',
+        'stickers.json'
+    )
 
     try {
         if (!fs.existsSync(dbPath)) {
             return {}
         }
 
-        const data =
-            fs.readFileSync(
-                dbPath,
-                'utf8'
-            )
-
-        return JSON.parse(
-            data || '{}'
+        const data = fs.readFileSync(
+            dbPath,
+            'utf8'
         )
+
+        return JSON.parse(data || '{}')
     } catch (error) {
         console.error(
             '[STICKER CMD] Error leyendo stickers:',
@@ -149,16 +117,67 @@ function loadStickerCommands() {
     }
 }
 
-function normalizeStickerCommand(
-    value
-) {
-    if (
-        typeof value !== 'string'
-    ) {
-        return ''
-    }
+function normalizeStickerCommand(value) {
+    if (typeof value !== 'string') return ''
 
     return value.trim()
+}
+
+function commandMatches(command, used) {
+    if (!command) return false
+
+    if (typeof command === 'string') {
+        return command.toLowerCase() === used.toLowerCase()
+    }
+
+    if (Array.isArray(command)) {
+        return command.some(item =>
+            commandMatches(item, used)
+        )
+    }
+
+    if (command instanceof RegExp) {
+        command.lastIndex = 0
+        return command.test(used)
+    }
+
+    return false
+}
+
+async function executePlugin(
+    sock,
+    m,
+    plugin,
+    args,
+    extra
+) {
+    try {
+        if (typeof plugin.before === 'function') {
+            await plugin.before(sock, m)
+        }
+
+        if (typeof plugin.run === 'function') {
+            await plugin.run(
+                sock,
+                m,
+                args,
+                extra
+            )
+        } else if (typeof plugin === 'function') {
+            await plugin(
+                sock,
+                m,
+                args,
+                extra
+            )
+        }
+    } catch (error) {
+        console.error(
+            `[PLUGIN] Error ejecutando ${plugin.__file || extra.command}:`
+        )
+
+        console.error(error)
+    }
 }
 
 async function executePluginCommand(
@@ -167,52 +186,35 @@ async function executePluginCommand(
     commandText,
     isBot
 ) {
-    if (
-        typeof commandText !== 'string'
-    ) {
+    if (typeof commandText !== 'string') {
         return false
     }
 
-    const text =
-        commandText.trim()
+    const text = commandText.trim()
 
-    if (!text) {
-        return false
-    }
+    if (!text) return false
 
-    const prefixMatch =
-        text.match(
-            /^[.!#$%&/?]/
-        )
+    const prefixMatch = text.match(
+        /^[.!#$%&/?]/
+    )
 
-    if (!prefixMatch) {
-        return false
-    }
+    if (!prefixMatch) return false
 
-    const prefix =
-        prefixMatch[0]
+    const prefix = prefixMatch[0]
 
-    const body =
-        text
-            .slice(
-                prefix.length
-            )
-            .trim()
+    const body = text
+        .slice(prefix.length)
+        .trim()
 
-    if (!body) {
-        return false
-    }
+    if (!body) return false
 
-    const parts =
-        body.split(/\s+/)
+    const parts = body.split(/\s+/)
 
-    const used =
-        parts
-            .shift()
-            .toLowerCase()
+    const used = parts
+        .shift()
+        .toLowerCase()
 
-    const args =
-        parts
+    const args = parts
 
     const sender =
         m.sender ||
@@ -221,28 +223,16 @@ async function executePluginCommand(
         m.chat ||
         ''
 
-    const senderNumber =
-        getNumber(sender)
+    const senderNumber = getNumber(sender)
 
-    const pluginList =
-        Array.from(
-            plugins.values()
-        )
+    const pluginList = Array.from(
+        plugins.values()
+    )
 
-    for (
-        const plugin
-        of pluginList
-    ) {
-        if (!plugin) {
-            continue
-        }
+    for (const plugin of pluginList) {
+        if (!plugin) continue
 
-        if (
-            !commandMatches(
-                plugin.command,
-                used
-            )
-        ) {
+        if (!commandMatches(plugin.command, used)) {
             continue
         }
 
@@ -257,45 +247,13 @@ async function executePluginCommand(
             stickerCommand: text
         }
 
-        try {
-            if (
-                typeof plugin.before ===
-                'function'
-            ) {
-                await plugin.before(
-                    sock,
-                    m
-                )
-            }
-
-            if (
-                typeof plugin.run ===
-                'function'
-            ) {
-                await plugin.run(
-                    sock,
-                    m,
-                    args,
-                    extra
-                )
-            } else if (
-                typeof plugin ===
-                'function'
-            ) {
-                await plugin(
-                    sock,
-                    m,
-                    args,
-                    extra
-                )
-            }
-        } catch (error) {
-            console.error(
-                `[PLUGIN] Error ejecutando comando de sticker ${plugin.__file || used}:`
-            )
-
-            console.error(error)
-        }
+        await executePlugin(
+            sock,
+            m,
+            plugin,
+            args,
+            extra
+        )
 
         return true
     }
@@ -303,40 +261,27 @@ async function executePluginCommand(
     return false
 }
 
-async function processSticker(
-    sock,
-    m
-) {
+async function processSticker(sock, m) {
     if (!isStickerMessage(m)) {
         return false
     }
 
-    const hash =
-        getStickerHash(m)
+    const hash = getStickerHash(m)
 
-    if (!hash) {
-        return false
-    }
+    if (!hash) return false
 
-    const stickerCommands =
-        loadStickerCommands()
+    const stickerCommands = loadStickerCommands()
 
-    const saved =
-        stickerCommands[hash]
+    const saved = stickerCommands[hash]
 
-    if (!saved) {
-        return false
-    }
+    if (!saved) return false
 
-    const command =
-        normalizeStickerCommand(
-            saved.command ||
-            saved.text
-        )
+    const command = normalizeStickerCommand(
+        saved.command ||
+        saved.text
+    )
 
-    if (!command) {
-        return false
-    }
+    if (!command) return false
 
     return await executePluginCommand(
         sock,
@@ -344,46 +289,6 @@ async function processSticker(
         command,
         isBotMessage(m)
     )
-}
-
-function commandMatches(
-    command,
-    used
-) {
-    if (!command) {
-        return false
-    }
-
-    if (
-        typeof command ===
-        'string'
-    ) {
-        return command
-            .toLowerCase() ===
-            used.toLowerCase()
-    }
-
-    if (
-        Array.isArray(command)
-    ) {
-        return command.some(
-            item =>
-                commandMatches(
-                    item,
-                    used
-                )
-        )
-    }
-
-    if (
-        command instanceof RegExp
-    ) {
-        command.lastIndex = 0
-
-        return command.test(used)
-    }
-
-    return false
 }
 
 async function loadPlugins() {
@@ -395,99 +300,81 @@ async function loadPlugins() {
         return pluginsLoading
     }
 
-    pluginsLoading =
-        (async () => {
-            const pluginsDir =
-                path.join(
-                    process.cwd(),
-                    'plugins'
-                )
+    pluginsLoading = (async () => {
+        const pluginsDir = path.join(
+            process.cwd(),
+            'plugins'
+        )
 
-            if (!fs.existsSync(pluginsDir)) {
-                fs.mkdirSync(
-                    pluginsDir,
-                    {
-                        recursive: true
-                    }
-                )
+        if (!fs.existsSync(pluginsDir)) {
+            fs.mkdirSync(
+                pluginsDir,
+                {
+                    recursive: true
+                }
+            )
+        }
+
+        const files = fs.readdirSync(
+            pluginsDir
+        ).filter(file =>
+            file.endsWith('.js')
+        )
+
+        for (const file of files) {
+            if (plugins.has(file)) {
+                continue
             }
 
-            const files =
-                fs.readdirSync(
-                    pluginsDir
-                )
-                    .filter(
-                        file =>
-                            file.endsWith(
-                                '.js'
-                            )
-                    )
+            const filePath = path.join(
+                pluginsDir,
+                file
+            )
 
-            for (
-                const file
-                of files
-            ) {
-                if (
-                    plugins.has(file)
-                ) {
+            try {
+                const pluginUrl =
+                    pathToFileURL(filePath).href
+
+                const imported = await import(
+                    `${pluginUrl}?v=${Date.now()}`
+                )
+
+                const plugin =
+                    imported.default ||
+                    imported
+
+                if (!plugin) {
                     continue
                 }
 
-                const filePath =
-                    path.join(
-                        pluginsDir,
-                        file
-                    )
+                plugin.__file = file
 
-                try {
-                    const pluginUrl =
-                        pathToFileURL(
-                            filePath
-                        ).href
+                plugins.set(
+                    file,
+                    plugin
+                )
 
-                    const imported =
-                        await import(
-                            `${pluginUrl}?v=${Date.now()}`
-                        )
+                console.log(
+                    `[PLUGIN] ${file} cargado.`
+                )
+            } catch (error) {
+                console.error(
+                    `[PLUGIN] Error cargando ${file}:`
+                )
 
-                    const plugin =
-                        imported.default ||
-                        imported
-
-                    if (!plugin) {
-                        continue
-                    }
-
-                    plugin.__file =
-                        file
-
-                    plugins.set(
-                        file,
-                        plugin
-                    )
-
-                    console.log(
-                        `[PLUGIN] ${file} cargado.`
-                    )
-                } catch (error) {
-                    console.error(
-                        `[PLUGIN] Error cargando ${file}:`
-                    )
-
-                    console.error(error)
-                }
+                console.error(error)
             }
+        }
 
-            console.log(
-                `[PLUGIN] ${plugins.size} plugin(s) cargado(s).`
-            )
-        })()
+        console.log(
+            `[PLUGIN] ${plugins.size} plugin(s) cargado(s).`
+        )
+    })()
 
     try {
         await pluginsLoading
     } finally {
-        pluginsLoading =
-            null
+        pluginsLoading = null
     }
 }
 
@@ -495,36 +382,23 @@ async function processMessage(
     sock,
     rawMessage
 ) {
-    if (!rawMessage) {
+    if (!rawMessage) return
+
+    if (isBeforeHandlerStart(sock, rawMessage)) {
         return
     }
 
-    if (
-        isBeforeHandlerStart(
-            sock,
-            rawMessage
-        )
-    ) {
-        return
-    }
-
-    if (
-        isOldMessage(
-            rawMessage
-        )
-    ) {
+    if (isOldMessage(rawMessage)) {
         return
     }
 
     let m
 
     try {
-        m =
-            smsg(
-                sock,
-                rawMessage
-            ) ||
+        m = smsg(
+            sock,
             rawMessage
+        ) || rawMessage
     } catch (error) {
         console.error(
             '[HANDLER] Error serializando mensaje:',
@@ -534,22 +408,13 @@ async function processMessage(
         return
     }
 
-    if (!m) {
+    if (!m) return
+
+    if (isBeforeHandlerStart(sock, m)) {
         return
     }
 
-    if (
-        isBeforeHandlerStart(
-            sock,
-            m
-        )
-    ) {
-        return
-    }
-
-    if (
-        isOldMessage(m)
-    ) {
+    if (isOldMessage(m)) {
         return
     }
 
@@ -558,9 +423,7 @@ async function processMessage(
         m.key?.remoteJid ||
         ''
 
-    if (!chat) {
-        return
-    }
+    if (!chat) return
 
     const sender =
         m.sender ||
@@ -611,8 +474,7 @@ async function processMessage(
         return
     }
 
-    const isBot =
-        isBotMessage(m)
+    const isBot = isBotMessage(m)
 
     const text =
         typeof m.text === 'string'
@@ -632,76 +494,34 @@ async function processMessage(
         return
     }
 
-    const prefix =
-        prefixMatch[0]
+    const prefix = prefixMatch[0]
 
-    const body =
-        text
-            .slice(
-                prefix.length
-            )
-            .trim()
+    const body = text
+        .slice(prefix.length)
+        .trim()
 
     if (!body) {
         return
     }
 
-    const parts =
-        body.split(/\s+/)
+    const parts = body.split(/\s+/)
 
-    const used =
-        parts
-            .shift()
-            .toLowerCase()
+    const used = parts
+        .shift()
+        .toLowerCase()
 
-    const args =
-        parts
+    const args = parts
 
-    const botOnlyCommand =
-        [
-            'kickall',
-            'eliminaratodos',
-            'sacaratodos'
-        ].includes(
-            used
-        )
+    const senderNumber = getNumber(sender)
 
-    if (
-        isBot &&
-        !botOnlyCommand
-    ) {
-        return
-    }
+    const pluginList = Array.from(
+        plugins.values()
+    )
 
-    if (
-        !isBot &&
-        botOnlyCommand
-    ) {
-        return
-    }
+    for (const plugin of pluginList) {
+        if (!plugin) continue
 
-    const senderNumber =
-        getNumber(sender)
-
-    const pluginList =
-        Array.from(
-            plugins.values()
-        )
-
-    for (
-        const plugin
-        of pluginList
-    ) {
-        if (!plugin) {
-            continue
-        }
-
-        if (
-            !commandMatches(
-                plugin.command,
-                used
-            )
-        ) {
+        if (!commandMatches(plugin.command, used)) {
             continue
         }
 
@@ -715,86 +535,41 @@ async function processMessage(
             fromSticker: false
         }
 
-        try {
-            if (
-                typeof plugin.before ===
-                'function'
-            ) {
-                await plugin.before(
-                    sock,
-                    m
-                )
-            }
-
-            if (
-                typeof plugin.run ===
-                'function'
-            ) {
-                await plugin.run(
-                    sock,
-                    m,
-                    args,
-                    extra
-                )
-            } else if (
-                typeof plugin ===
-                'function'
-            ) {
-                await plugin(
-                    sock,
-                    m,
-                    args,
-                    extra
-                )
-            }
-        } catch (error) {
-            console.error(
-                `[PLUGIN] Error ejecutando ${plugin.__file || used}:`
-            )
-
-            console.error(error)
-        }
+        await executePlugin(
+            sock,
+            m,
+            plugin,
+            args,
+            extra
+        )
 
         break
     }
 }
 
-function runMessage(
-    sock,
-    message
-) {
+function runMessage(sock, message) {
     setImmediate(() => {
         processMessage(
             sock,
             message
-        ).catch(
-            error => {
-                console.error(
-                    '[HANDLER] Error procesando mensaje:',
-                    error
-                )
-            }
-        )
+        ).catch(error => {
+            console.error(
+                '[HANDLER] Error procesando mensaje:',
+                error
+            )
+        })
     })
 }
 
-async function handler(
-    sock,
-    update
-) {
+async function handler(sock, update) {
     if (
         !update ||
-        !Array.isArray(
-            update.messages
-        )
+        !Array.isArray(update.messages)
     ) {
         return
     }
 
-    for (
-        const message
-        of update.messages
-    ) {
+    for (const message of update.messages) {
         runMessage(
             sock,
             message
@@ -802,23 +577,14 @@ async function handler(
     }
 }
 
-async function initHandler(
-    sock
-) {
+async function initHandler(sock) {
     await loadPlugins()
 
-    if (
-        !sock ||
-        !sock.ev
-    ) {
+    if (!sock || !sock.ev) {
         return handler
     }
 
-    if (
-        initializedSockets.has(
-            sock
-        )
-    ) {
+    if (initializedSockets.has(sock)) {
         return handler
     }
 
@@ -827,9 +593,7 @@ async function initHandler(
         Date.now()
     )
 
-    initializedSockets.add(
-        sock
-    )
+    initializedSockets.add(sock)
 
     console.log(
         '[HANDLER] Sistema de comandos iniciado.'
@@ -841,14 +605,12 @@ async function initHandler(
             handler(
                 sock,
                 update
-            ).catch(
-                error => {
-                    console.error(
-                        '[HANDLER] Error procesando mensajes:',
-                        error
-                    )
-                }
-            )
+            ).catch(error => {
+                console.error(
+                    '[HANDLER] Error procesando mensajes:',
+                    error
+                )
+            })
         }
     )
 
