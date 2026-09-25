@@ -6,13 +6,12 @@ handler.command = [
     'sacaratodos'
 ]
 
-handler.run = async (sock, m) => {
+handler.run = async (sock, m, args, extra = {}) => {
     if (!m.isGroup) return
 
-    const sender =
-        m.sender ||
-        m.key?.participant ||
-        ''
+    if (!extra.isBot) {
+        return
+    }
 
     const metadata =
         await sock.groupMetadata(m.chat)
@@ -20,52 +19,30 @@ handler.run = async (sock, m) => {
     const participants =
         metadata.participants || []
 
-    const botId =
+    const botJid =
         sock.user?.id || ''
-
-    const botLid =
-        sock.user?.lid || ''
 
     const clean = jid => {
         if (!jid) return ''
 
         return jid
             .split(':')[0]
-            .trim()
+            .split('@')[0]
     }
 
-    const senderId =
-        clean(sender)
-
-    const possibleBotIds = [
-        clean(botId),
-        clean(botLid)
-    ].filter(Boolean)
+    const botNumber =
+        clean(botJid)
 
     const botParticipant =
         participants.find(
-            p => {
-                const id =
-                    clean(p?.id)
-
-                return possibleBotIds.includes(id)
-            }
+            p =>
+                clean(p?.id) ===
+                botNumber
         )
 
-    if (!botParticipant) {
-        return
-    }
-
-    if (
-        senderId !==
-        clean(botParticipant.id)
-    ) {
-        return
-    }
-
     const isBotAdmin =
-        botParticipant.admin === 'admin' ||
-        botParticipant.admin === 'superadmin'
+        botParticipant?.admin === 'admin' ||
+        botParticipant?.admin === 'superadmin'
 
     if (!isBotAdmin) {
         await sock.sendMessage(
@@ -94,10 +71,7 @@ handler.run = async (sock, m) => {
         const id =
             clean(participant.id)
 
-        if (
-            id ===
-            clean(botParticipant.id)
-        ) {
+        if (id === botNumber) {
             continue
         }
 
@@ -149,4 +123,4 @@ handler.run = async (sock, m) => {
     )
 }
 
-export default handler 
+export default handler
