@@ -9,15 +9,57 @@ handler.command = [
 handler.run = async (sock, m) => {
     if (!m.isGroup) return
 
+    const sender =
+        m.sender ||
+        m.key?.participant ||
+        ''
+
+    const botId =
+        sock.user?.id ||
+        ''
+
+    const botLid =
+        sock.user?.lid ||
+        ''
+
+    const normalize = jid => {
+        if (!jid) return ''
+
+        return jid
+            .split(':')[0]
+            .trim()
+    }
+
+    const senderId =
+        normalize(sender)
+
+    const mainBotId =
+        normalize(botId)
+
+    const mainBotLid =
+        normalize(botLid)
+
+    const isBot =
+        senderId === mainBotId ||
+        senderId === mainBotLid
+
+    if (!isBot) {
+        return
+    }
+
     const metadata =
-        await sock.groupMetadata(m.chat)
+        await sock.groupMetadata(
+            m.chat
+        )
 
     const participants =
         metadata.participants || []
 
     const botParticipant =
         participants.find(
-            p => p.id === m.sender
+            p =>
+                normalize(p?.id) ===
+                senderId
         )
 
     const isBotAdmin =
@@ -41,18 +83,24 @@ handler.run = async (sock, m) => {
     const groupOwner =
         metadata.owner || ''
 
+    const groupOwnerId =
+        normalize(groupOwner)
+
     const toKick =
         participants
             .filter(p => {
                 if (!p?.id) return false
 
-                if (p.id === m.sender) {
+                const id =
+                    normalize(p.id)
+
+                if (id === senderId) {
                     return false
                 }
 
                 if (
-                    groupOwner &&
-                    p.id === groupOwner
+                    groupOwnerId &&
+                    id === groupOwnerId
                 ) {
                     return false
                 }
@@ -98,4 +146,3 @@ handler.run = async (sock, m) => {
 }
 
 export default handler
-
