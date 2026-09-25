@@ -93,6 +93,16 @@ function getStickerHash(message) {
     }
 }
 
+function getCommand(args) {
+    if (!Array.isArray(args)) {
+        return ''
+    }
+
+    return args
+        .join(' ')
+        .trim()
+}
+
 const handler = async (
     sock,
     m,
@@ -101,7 +111,7 @@ const handler = async (
 ) => {
     if (!m.quoted) {
         await m.reply(
-            '❌ Por favor, responde a un sticker para agregar el comando.'
+            '❌ Responde a un sticker para agregarle un comando.'
         )
 
         return
@@ -120,20 +130,20 @@ const handler = async (
         return
     }
 
-    const text =
-        Array.isArray(args)
-            ? args.join(' ').trim()
-            : ''
+    const command =
+        getCommand(args)
 
-    if (!text) {
-        const prefix =
-            extra.prefix || '.'
-
-        const command =
-            extra.command || 'addcmd'
-
+    if (!command) {
         await m.reply(
-            `❌ Falta el texto para el comando.\n\nUso:\n${prefix}${command} <texto>\n\nEjemplo:\n${prefix}${command} hola`
+            `❌ Falta el comando.\n\nEjemplo:\n${extra.prefix || '.'}addcmd .p`
+        )
+
+        return
+    }
+
+    if (!command.startsWith('.')) {
+        await m.reply(
+            '❌ El comando debe comenzar con un prefijo.\n\nEjemplo:\n.addcmd .p'
         )
 
         return
@@ -147,20 +157,14 @@ const handler = async (
         sticker[hash].locked
     ) {
         await m.reply(
-            '❌ No puedes modificar este comando, está bloqueado.'
+            '❌ Este sticker tiene el comando bloqueado.'
         )
 
         return
     }
 
     sticker[hash] = {
-        text,
-        mentionedJid:
-            Array.isArray(
-                m.mentionedJid
-            )
-                ? m.mentionedJid
-                : [],
+        command,
         creator:
             m.sender ||
             m.key?.participant ||
@@ -173,15 +177,20 @@ const handler = async (
     try {
         saveDB(sticker)
     } catch (error) {
+        console.error(
+            '[STICKER CMD] Error guardando:',
+            error
+        )
+
         await m.reply(
-            '❌ No se pudo guardar el comando del sticker.'
+            '❌ No se pudo guardar el comando.'
         )
 
         return
     }
 
     await m.reply(
-        '✅ Comando agregado al sticker correctamente.\n\n🌎 Este sticker funcionará globalmente en todos los grupos donde esté el bot o un SubBot.'
+        `✅ Comando agregado correctamente.\n\n🎯 Comando: ${command}\n🌎 Disponible globalmente en el bot principal y SubBots.`
     )
 }
 
