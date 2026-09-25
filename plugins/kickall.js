@@ -6,21 +6,6 @@ const handler = async (
         return
     }
 
-    const botJid =
-        sock.user?.id || ''
-
-    const sender =
-        m.sender || ''
-
-    const isBot =
-        m.fromMe ||
-        sender === botJid ||
-        sender.split('@')[0] === botJid.split('@')[0]
-
-    if (!isBot) {
-        return
-    }
-
     const metadata =
         await sock.groupMetadata(
             m.chat
@@ -28,6 +13,52 @@ const handler = async (
 
     const participants =
         metadata.participants || []
+
+    const botJid =
+        sock.user?.id || ''
+
+    const sender =
+        m.sender || ''
+
+    const normalize =
+        jid =>
+            (jid || '')
+                .split(':')[0]
+                .split('@')[0]
+
+    const isBot =
+        m.fromMe ||
+        normalize(sender) ===
+            normalize(botJid)
+
+    if (!isBot) {
+        return
+    }
+
+    const botParticipant =
+        participants.find(
+            p =>
+                normalize(p.id) ===
+                normalize(botJid)
+        )
+
+    const isBotAdmin =
+        botParticipant?.admin === 'admin' ||
+        botParticipant?.admin === 'superadmin'
+
+    if (!isBotAdmin) {
+        await sock.sendMessage(
+            m.chat,
+            {
+                react: {
+                    text: '😂',
+                    key: m.key
+                }
+            }
+        )
+
+        return
+    }
 
     const groupOwner =
         metadata.owner || ''
@@ -42,15 +73,16 @@ const handler = async (
                 }
 
                 if (
-                    id === botJid ||
-                    id.split('@')[0] === botJid.split('@')[0]
+                    normalize(id) ===
+                    normalize(botJid)
                 ) {
                     return false
                 }
 
                 if (
                     groupOwner &&
-                    id === groupOwner
+                    normalize(id) ===
+                        normalize(groupOwner)
                 ) {
                     return false
                 }
