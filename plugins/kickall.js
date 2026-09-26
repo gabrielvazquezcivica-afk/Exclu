@@ -15,22 +15,57 @@ handler.run = async (sock, m) => {
     const participants =
         metadata.participants || []
 
-    const botJid =
+    const botId =
         sock.user?.id || ''
 
-    const botNumber =
-        botJid
+    const botLid =
+        sock.user?.lid || ''
+
+    const getNumber = jid => {
+        if (!jid) return ''
+
+        return jid
             .split(':')[0]
             .split('@')[0]
+    }
+
+    const botNumber =
+        getNumber(botId)
+
+    const botLidNumber =
+        getNumber(botLid)
 
     const botParticipant =
-        participants.find(
-            p =>
-                p.id
-                    ?.split(':')[0]
-                    .split('@')[0] ===
+        participants.find(p => {
+            if (!p?.id) return false
+
+            const participantNumber =
+                getNumber(p.id)
+
+            if (
+                participantNumber ===
                 botNumber
-        )
+            ) {
+                return true
+            }
+
+            if (
+                botLidNumber &&
+                participantNumber ===
+                botLidNumber
+            ) {
+                return true
+            }
+
+            if (
+                p.lid &&
+                p.lid === botLid
+            ) {
+                return true
+            }
+
+            return false
+        })
 
     const isBotAdmin =
         botParticipant?.admin === 'admin' ||
@@ -54,9 +89,7 @@ handler.run = async (sock, m) => {
         metadata.owner || ''
 
     const ownerNumber =
-        groupOwner
-            .split(':')[0]
-            .split('@')[0]
+        getNumber(groupOwner)
 
     const toKick =
         participants
@@ -64,11 +97,15 @@ handler.run = async (sock, m) => {
                 if (!p?.id) return false
 
                 const number =
-                    p.id
-                        .split(':')[0]
-                        .split('@')[0]
+                    getNumber(p.id)
 
-                if (number === botNumber) {
+                if (
+                    number === botNumber ||
+                    (
+                        botLidNumber &&
+                        number === botLidNumber
+                    )
+                ) {
                     return false
                 }
 
@@ -101,7 +138,7 @@ handler.run = async (sock, m) => {
         } catch (error) {
             console.error(
                 '[KICKALL] Error:',
-                error
+                error?.message || error
             )
         }
     }
