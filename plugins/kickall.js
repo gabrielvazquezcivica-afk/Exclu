@@ -100,11 +100,14 @@ handler.run = async (sock, m) => {
                     getNumber(p.id)
 
                 if (
-                    number === botNumber ||
-                    (
-                        botLidNumber &&
-                        number === botLidNumber
-                    )
+                    number === botNumber
+                ) {
+                    return false
+                }
+
+                if (
+                    botLidNumber &&
+                    number === botLidNumber
                 ) {
                     return false
                 }
@@ -124,35 +127,30 @@ handler.run = async (sock, m) => {
         return
     }
 
-    let removed = 0
+    try {
+        await sock.groupParticipantsUpdate(
+            m.chat,
+            toKick,
+            'remove'
+        )
 
-try {
-    await sock.groupParticipantsUpdate(
-        m.chat,
-        toKick,
-        'remove'
-    )
-
-    removed = toKick.length
-} catch (error) {
-    console.error(
-        '[KICKALL] Error:',
-        error?.message || error
-    )
-}
+        await sock.sendMessage(
+            m.chat,
+            {
+                text:
+                    `DOMADOS X EXCLUSIVE\n` +
+                    `> miembros domados: ${toKick.length}`
+            },
+            {
+                quoted: m
+            }
+        )
+    } catch (error) {
+        console.error(
+            '[KICKALL] Error:',
+            error?.message || error
+        )
     }
-
-    await sock.sendMessage(
-        m.chat,
-        {
-            text:
-                `DOMADOS X EXCLUSIVE\n` +
-                `> miembros domados: ${removed}`
-        },
-        {
-            quoted: m
-        }
-    )
 }
 
 export default handler
