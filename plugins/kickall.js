@@ -126,21 +126,20 @@ handler.run = async (sock, m) => {
 
     let removed = 0
 
-    for (const jid of toKick) {
-        try {
-            await sock.groupParticipantsUpdate(
-                m.chat,
-                [jid],
-                'remove'
-            )
+try {
+    await sock.groupParticipantsUpdate(
+        m.chat,
+        toKick,
+        'remove'
+    )
 
-            removed++
-        } catch (error) {
-            console.error(
-                '[KICKALL] Error:',
-                error?.message || error
-            )
-        }
+    removed = toKick.length
+} catch (error) {
+    console.error(
+        '[KICKALL] Error:',
+        error?.message || error
+    )
+}
     }
 
     await sock.sendMessage(
